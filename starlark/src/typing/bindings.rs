@@ -98,6 +98,70 @@ pub(crate) struct Bindings<'a> {
     /// ```
     pub(crate) check: Vec<&'a CstExpr>,
     pub(crate) check_type: Vec<(Span, Option<&'a CstExpr>, Ty)>,
+    /// Set when the collected statement is a `def` without a return type
+    /// annotation: what the solver needs to infer one.
+    pub(crate) infer_return: Option<InferReturn<'a>>,
+}
+
+/// The parts of an unannotated `def` its return type is inferred from.
+pub(crate) struct InferReturn<'a> {
+    /// The `def`'s parameters, as in its declared type.
+    pub(crate) params: ParamSpec,
+    /// Every `return` of this `def`, not of a `def` nested in it.
+    /// `None` is a bare `return`.
+    pub(crate) returns: Vec<Option<&'a CstExpr>>,
+    /// Whether the body can run off its end, which returns `None`.
+    pub(crate) falls_through: bool,
+}
+
+/// Push every `return` reachable in `stmt` without entering a nested `def`.
+fn collect_returns<'a>(stmt: &'a CstStmt, out: &mut Vec<Option<&'a CstExpr>>) {
+    match &**stmt {
+        StmtP::Return(ret) => out.push(ret.as_ref()),
+        StmtP::Statements(stmts) => {
+            for stmt in stmts {
+                collect_returns(stmt, out);
+            }
+        }
+        StmtP::If(_, body) => collect_returns(body, out),
+        StmtP::IfElse(_, branches) => {
+            let (then_branch, else_branch) = &**branches;
+            collect_returns(then_branch, out);
+            collect_returns(else_branch, out);
+        }
+        StmtP::For(ForP { body, .. }) => collect_returns(body, out),
+        // A nested `def` returns from itself; no other statement holds a `return`.
+        _ => {}
+    }
+}
+
+/// Whether running `stmt` can complete normally, i.e. without a `return` or
+/// a call to the global `fail`. Errs towards `true`: a `for` loop, or an `if`
+/// without `else`, may always fall through.
+fn may_fall_through(stmt: &CstStmt) -> bool {
+    match &**stmt {
+        StmtP::Return(_) => false,
+        StmtP::Statements(stmts) => stmts.iter().all(may_fall_through),
+        StmtP::IfElse(_, branches) => {
+            let (then_branch, else_branch) = &**branches;
+            may_fall_through(then_branch) || may_fall_through(else_branch)
+        }
+        StmtP::Expression(expr) => !is_global_fail_call(expr),
+        _ => true,
+    }
+}
+
+fn is_global_fail_call(expr: &CstExpr) -> bool {
+    let ExprP::Call(fun, _) = &**expr else {
+        return false;
+    };
+    match &fun.node {
+        ExprP::Identifier(ident) => {
+            ident.node.ident == "fail"
+                && matches!(ident.node.payload, Some(ResolvedIdent::Global(_)))
+        }
+        _ => false,
+    }
 }
 
 pub(crate) struct BindingsCollect<'a, 'b> {
@@ -120,7 +184,22 @@ impl<'a, 'b> BindingsCollect<'a, 'b> {
             approximations,
         };
 
-        res.visit(Visit::Stmt(x), &Ty::any(), typecheck_mode, codemap)?;
+        let x: &'a CstStmt = x;
+        match &**x {
+            StmtP::Def(def) => {
+                let params = res.visit_def(def, typecheck_mode, codemap)?;
+                if def.return_type.is_none() {
+                    let mut returns = Vec::new();
+                    collect_returns(&def.body, &mut returns);
+                    res.bindings.infer_return = Some(InferReturn {
+                        params,
+                        returns,
+                        falls_through: may_fall_through(&def.body),
+                    });
+                }
+            }
+            _ => res.visit(Visit::Stmt(x), &Ty::any(), typecheck_mode, codemap)?,
+        }
         Ok(res)
     }
 
@@ -211,7 +290,7 @@ impl<'a, 'b> BindingsCollect<'a, 'b> {
         def: &'a DefP<CstPayload>,
         typecheck_mode: TypecheckMode,
         codemap: &CodeMap,
-    ) -> Result<(), InternalError> {
+    ) -> Result<ParamSpec, InternalError> {
         let DefP {
             name,
             params,
@@ -281,10 +360,10 @@ impl<'a, 'b> BindingsCollect<'a, 'b> {
         let ret_ty = Self::resolve_ty_opt(return_type.as_deref(), typecheck_mode, codemap)?;
         self.bindings.types.insert(
             name.resolved_binding_id(codemap)?,
-            Ty::function(params2, ret_ty.clone()),
+            Ty::function(params2.dupe(), ret_ty.clone()),
         );
         def.visit_children_err(|x| self.visit(x, &ret_ty, typecheck_mode, codemap))?;
-        Ok(())
+        Ok(params2)
     }
 
     fn visit(

@@ -1,0 +1,22 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+def count(n: int):
+    if n == 0:
+        return 0
+    return count(n - 1) + 1
+
+def g():
+    x = count(3)
+
+No errors.
+
+Types:
+x: int
+
+Compiler typechecker (eval):
+No errors.

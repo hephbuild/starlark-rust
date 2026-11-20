@@ -1,0 +1,20 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+def f(n: int) -> typing.Any:
+    return n
+
+def g():
+    x = f(1)
+
+No errors.
+
+Types:
+x: typing.Any
+
+Compiler typechecker (eval):
+No errors.

@@ -34,15 +34,21 @@ use crate::codemap::Span;
 use crate::codemap::Spanned;
 use crate::environment::Globals;
 use crate::environment::names::MutableNames;
+use crate::environment::slots::ModuleSlotId;
 use crate::eval::compiler::scope::BindingId;
 use crate::eval::compiler::scope::BindingSource;
+use crate::eval::compiler::scope::ModuleScopeData;
 use crate::eval::compiler::scope::ModuleScopes;
+use crate::eval::compiler::scope::Slot;
+use crate::eval::compiler::scope::payload::CstAssignIdentExt;
 use crate::eval::compiler::scope::payload::CstStmt;
 use crate::eval::compiler::scope::scope_resolver_globals::ScopeResolverGlobals;
 use crate::syntax::AstModule;
 use crate::syntax::Dialect;
+use crate::typing::ParamSpec;
 use crate::typing::bindings::Bindings;
 use crate::typing::bindings::BindingsCollect;
+use crate::typing::bindings::InferReturn;
 use crate::typing::ctx::TypingContext;
 use crate::typing::error::InternalError;
 use crate::typing::error::TypingError;
@@ -55,12 +61,21 @@ use crate::typing::ty::Approximation;
 use crate::typing::ty::Ty;
 use crate::values::FrozenHeap;
 
+/// What [`solve_bindings`] returns: errors, binding types, approximations, and
+/// the inferred type of the collected `def` when it has no return annotation.
+pub(crate) type Solved = (
+    Vec<TypingError>,
+    HashMap<BindingId, Ty>,
+    Vec<Approximation>,
+    Option<Ty>,
+);
+
 // Things which are None in the map have type void - they are never constructed
 pub(crate) fn solve_bindings(
     bindings: Bindings,
     oracle: TypingOracleCtx,
     module_var_types: &ModuleVarTypes,
-) -> Result<(Vec<TypingError>, HashMap<BindingId, Ty>, Vec<Approximation>), InternalError> {
+) -> Result<Solved, InternalError> {
     let mut types = bindings
         .expressions
         .keys()
@@ -120,11 +135,149 @@ pub(crate) fn solve_bindings(
             require,
         )?;
     }
+    let inferred = match bindings.infer_return {
+        None => None,
+        Some(InferReturn {
+            params,
+            returns,
+            falls_through,
+        }) => {
+            // Every returned expression was checked above: keep only the
+            // types, not a second copy of their errors and approximations.
+            let errors = ctx.errors.borrow().len();
+            let approximations = ctx.approximoations.borrow().len();
+            let mut results = Vec::with_capacity(returns.len() + 1);
+            for ret in returns {
+                results.push(match ret {
+                    None => Ty::none(),
+                    Some(x) => ctx.expression_type(x)?,
+                });
+            }
+            ctx.errors.borrow_mut().truncate(errors);
+            ctx.approximoations.borrow_mut().truncate(approximations);
+            if falls_through {
+                results.push(Ty::none());
+            }
+            Some(Ty::function(params, Ty::unions(results)))
+        }
+    };
     Ok((
         ctx.errors.into_inner(),
         ctx.types.into_hash_map(),
         ctx.approximoations.into_inner(),
+        inferred,
     ))
+}
+
+/// The module slot a top-level `def` binds.
+fn def_module_slot(
+    stmt: &CstStmt,
+    scope_data: &ModuleScopeData,
+    codemap: &CodeMap,
+) -> Result<Option<ModuleSlotId>, InternalError> {
+    let StmtP::Def(def) = &**stmt else {
+        return Ok(None);
+    };
+    if def.return_type.is_some() {
+        return Ok(None);
+    }
+    let binding_id = def.name.resolved_binding_id(codemap)?;
+    match scope_data.get_binding(binding_id).resolved_slot(codemap)? {
+        Slot::Module(slot) => Ok(Some(slot)),
+        Slot::Local(_) => Err(InternalError::msg(
+            "top-level def bound to a local slot",
+            def.name.span,
+            codemap,
+        )),
+    }
+}
+
+/// Infer the return type of each top-level `def` without a return annotation,
+/// and record it in `module_var_types`, so that every other `def` (and the
+/// module's interface) sees `def f(x: int): return x + 1` as
+/// `def f(x: int) -> int`.
+///
+/// Each `def` is solved on its own against the module's variable types, so a
+/// `def` calling another needs the callee's result first: the `def`s are
+/// re-solved until no inferred type changes. They start from `never`, so a
+/// recursive `def` takes the type of its non-recursive returns. A name bound
+/// anywhere else in the module keeps its declared type, as does every `def`
+/// when the types do not settle.
+fn infer_top_level_returns(
+    cst: &mut [&mut CstStmt],
+    oracle: TypingOracleCtx,
+    scope_data: &ModuleScopeData,
+    codemap: &CodeMap,
+    module_var_types: &mut ModuleVarTypes,
+    approximations: &mut Vec<Approximation>,
+) -> Result<(), InternalError> {
+    // The index into `cst`, the slot, and the declared parameters of each
+    // `def` whose return type is inferred.
+    let mut defs: Vec<(usize, ModuleSlotId, ParamSpec)> = Vec::new();
+    // The final pass over each `def` collects and reports approximations;
+    // the rounds here would only repeat them.
+    let mut ignored_approximations = Vec::new();
+    for (i, stmt) in cst.iter_mut().enumerate() {
+        let Some(slot) = def_module_slot(stmt, scope_data, codemap)? else {
+            continue;
+        };
+        let collected = BindingsCollect::collect_one(
+            stmt,
+            TypecheckMode::Lint,
+            codemap,
+            &mut ignored_approximations,
+        )?;
+        let Some(infer) = collected.bindings.infer_return else {
+            continue;
+        };
+        let declared = Ty::function(infer.params.dupe(), Ty::any());
+        if module_var_types.types.get(&slot) != Some(&declared) {
+            // The name is also bound by an assignment, a `for`, or a second `def`.
+            continue;
+        }
+        module_var_types
+            .types
+            .insert(slot, Ty::function(infer.params.dupe(), Ty::never()));
+        defs.push((i, slot, infer.params));
+    }
+    if defs.is_empty() {
+        return Ok(());
+    }
+
+    // Each round settles at least one more link of the longest call chain.
+    const ITERATIONS: usize = 10;
+    for _ in 0..ITERATIONS {
+        let mut changed = false;
+        for (i, slot, _) in &defs {
+            ignored_approximations.clear();
+            let collected = BindingsCollect::collect_one(
+                cst[*i],
+                TypecheckMode::Lint,
+                codemap,
+                &mut ignored_approximations,
+            )?;
+            let (.., inferred) = solve_bindings(collected.bindings, oracle, module_var_types)?;
+            let Some(ty) = inferred else { continue };
+            if module_var_types.types.get(slot) != Some(&ty) {
+                module_var_types.types.insert(*slot, ty);
+                changed = true;
+            }
+        }
+        if !changed {
+            return Ok(());
+        }
+    }
+
+    for (_, slot, params) in defs {
+        module_var_types
+            .types
+            .insert(slot, Ty::function(params, Ty::any()));
+    }
+    approximations.push(Approximation::new(
+        "Return type inference didn't converge",
+        ITERATIONS,
+    ));
+    Ok(())
 }
 
 /// Structure containing all the inferred types.
@@ -220,7 +373,7 @@ impl AstModuleTypecheck for AstModule {
         let oracle = TypingOracleCtx { codemap: &codemap };
 
         let mut approximations = Vec::new();
-        let (fill_types_errors, module_var_types) = match fill_types_for_lint_typechecker(
+        let (fill_types_errors, mut module_var_types) = match fill_types_for_lint_typechecker(
             &mut cst,
             oracle,
             &scope_data,
@@ -239,6 +392,25 @@ impl AstModuleTypecheck for AstModule {
                 );
             }
         };
+
+        if let Err(e) = infer_top_level_returns(
+            &mut cst,
+            oracle,
+            &scope_data,
+            &codemap,
+            &mut module_var_types,
+            &mut approximations,
+        ) {
+            return (
+                vec![InternalError::into_error(e)],
+                TypeMap {
+                    codemap,
+                    bindings: UnorderedMap::new(),
+                },
+                Interface::default(),
+                Vec::new(),
+            );
+        }
 
         let mut typemap = UnorderedMap::new();
         let mut all_solve_errors = Vec::new();
@@ -264,7 +436,7 @@ impl AstModuleTypecheck for AstModule {
                         );
                     }
                 };
-                let (solve_errors, types, solve_approximations) =
+                let (solve_errors, types, solve_approximations, _) =
                     match solve_bindings(bindings.bindings, oracle, &module_var_types) {
                         Ok(x) => x,
                         Err(e) => {

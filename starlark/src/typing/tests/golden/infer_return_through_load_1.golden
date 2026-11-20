@@ -1,0 +1,27 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+load("names.bzl", "make_name")
+def g():
+    x = make_name(1)
+    n: int = make_name(1)
+
+Error:
+error: Expected type `int` but got `str`
+ --> filename:5:8
+  |
+5 |     n: int = make_name(1)
+  |        ^^^
+  |
+
+Types:
+x: str
+
+Compiler typechecker (eval):
+Compiler typechecker and eval results mismatch.
+
+No errors.

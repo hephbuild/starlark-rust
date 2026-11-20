@@ -1,0 +1,39 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+def bare(n: int):
+    if n > 0:
+        return "pos"
+    return
+
+def falls(n: int):
+    if n > 0:
+        return "pos"
+
+def g():
+    x = bare(1)
+    y = falls(1)
+
+def h():
+    n: int = falls(1)
+
+Error:
+error: Expected type `int` but got `None | str`
+  --> filename:16:8
+   |
+16 |     n: int = falls(1)
+   |        ^^^
+   |
+
+Types:
+x: None | str
+y: None | str
+
+Compiler typechecker (eval):
+Compiler typechecker and eval results mismatch.
+
+No errors.

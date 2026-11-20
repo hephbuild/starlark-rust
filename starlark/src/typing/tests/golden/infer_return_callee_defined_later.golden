@@ -1,0 +1,23 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+def g():
+    x = outer()
+
+def outer():
+    return [inner()]
+
+def inner():
+    return "s"
+
+No errors.
+
+Types:
+x: list[str]
+
+Compiler typechecker (eval):
+No errors.
