@@ -22,6 +22,7 @@ use starlark_map::small_map::SmallMap;
 use starlark_syntax::syntax::ast::AssignOp;
 use starlark_syntax::syntax::ast::AssignP;
 use starlark_syntax::syntax::ast::AssignTargetP;
+use starlark_syntax::syntax::ast::AstLiteral;
 use starlark_syntax::syntax::ast::ClauseP;
 use starlark_syntax::syntax::ast::DefP;
 use starlark_syntax::syntax::ast::ExprP;
@@ -161,6 +162,41 @@ fn is_global_fail_call(expr: &CstExpr) -> bool {
                 && matches!(ident.node.payload, Some(ResolvedIdent::Global(_)))
         }
         _ => false,
+    }
+}
+
+/// The type an unannotated parameter takes from its default, when the
+/// default is a literal: `1` is `int`, `-1.5` is `float`, `"s"` is `str`,
+/// `True` is `bool`, and `[...]`, `{...}`, `(...)` are a list, dict or tuple
+/// of `Any`. A container's elements are not inferred: `x = []` is filled in
+/// later by callers, and `["a"]` is an example, not a schema.
+///
+/// `None` infers nothing: `x = None` means "optional something", and typing
+/// it `None` would refuse every real argument. Any other expression infers
+/// nothing either; the parameter stays `Any`.
+///
+/// The body (`visit_def`) and the module-level type callers are checked
+/// against (`fill_types_for_lint`) both take parameter types from here.
+pub(crate) fn literal_default_ty(expr: &CstExpr) -> Option<Ty> {
+    let number = |expr: &CstExpr| match &**expr {
+        ExprP::Literal(AstLiteral::Int(_)) => Some(Ty::int()),
+        ExprP::Literal(AstLiteral::Float(_)) => Some(Ty::float()),
+        _ => None,
+    };
+    match &**expr {
+        ExprP::Literal(AstLiteral::String(_)) => Some(Ty::string()),
+        ExprP::Literal(_) => number(expr),
+        ExprP::Minus(x) | ExprP::Plus(x) => number(x),
+        ExprP::Identifier(ident)
+            if matches!(ident.node.ident.as_str(), "True" | "False")
+                && matches!(ident.node.payload, Some(ResolvedIdent::Global(_))) =>
+        {
+            Some(Ty::bool())
+        }
+        ExprP::List(_) => Some(Ty::any_list()),
+        ExprP::Dict(_) => Some(Ty::any_dict()),
+        ExprP::Tuple(_) => Some(Ty::any_tuple()),
+        _ => None,
     }
 }
 
@@ -308,8 +344,12 @@ impl<'a, 'b> BindingsCollect<'a, 'b> {
 
         for p in params {
             let name = &p.node.ident;
-            let ty = p.node.ty;
-            let ty = Self::resolve_ty_opt(ty, typecheck_mode, codemap)?;
+            let ty = match (p.node.ty, &p.node.kind) {
+                (None, DefParamKind::Regular(_, Some(default))) => {
+                    literal_default_ty(default).unwrap_or_else(Ty::any)
+                }
+                (ty, _) => Self::resolve_ty_opt(ty, typecheck_mode, codemap)?,
+            };
             let name_ty = match &p.node.kind {
                 DefParamKind::Regular(mode, default_value) => {
                     let required = match default_value.is_some() {

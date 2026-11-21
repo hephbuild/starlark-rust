@@ -57,6 +57,7 @@ use crate::typing::Approximation;
 use crate::typing::ParamSpec;
 use crate::typing::Ty;
 use crate::typing::TypingOracleCtx;
+use crate::typing::bindings::literal_default_ty;
 use crate::typing::callable_param::ParamIsRequired;
 use crate::typing::error::InternalError;
 use crate::typing::error::TypingError;
@@ -454,7 +455,12 @@ impl<'a, 'v> GlobalTypesBuilder<'a, 'v> {
         let mut kwargs = None;
 
         for param in def_params {
-            let ty = self.get_ty_expr_opt(param.ty)?;
+            let ty = match (param.ty, &param.kind) {
+                (None, DefParamKind::Regular(_, Some(default))) => {
+                    literal_default_ty(default).unwrap_or_else(Ty::any)
+                }
+                (ty, _) => self.get_ty_expr_opt(ty)?,
+            };
             match param.kind {
                 DefParamKind::Regular(mode, default_value) => {
                     let name = param.ident.ident.as_str();
