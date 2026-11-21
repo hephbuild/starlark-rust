@@ -169,6 +169,37 @@ g()
     );
 }
 
+/// Outside `**kwargs` the type is a dict's: `in`, `|` (either side), indexing,
+/// iteration and dict methods typecheck, statically and in the compiler
+/// typechecker, and the body runs.
+#[test]
+fn test_typed_kwargs_as_dict_param() {
+    TypeCheck::new()
+        .ty("merged")
+        .ty("merged_rhs")
+        .ty("r")
+        .ty("key")
+        .ty("got")
+        .check(
+            "typed_kwargs_as_dict_param",
+            r#"
+def f(k: ns.bash.Kwargs) -> int:
+    n = 0
+    if "run" in k:
+        n += 1
+    merged = k | {"count": 2}
+    merged_rhs = {"run": "x"} | k
+    r = k["run"]
+    for key in k:
+        n += len(key)
+    got = k.get("run")
+    return n + len(merged) + len(merged_rhs)
+
+f({"run": "echo", "count": 1})
+"#,
+        );
+}
+
 #[test]
 fn test_plain_kwargs_unchanged() {
     TypeCheck::new().ty("kw").check(

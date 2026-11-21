@@ -1,0 +1,32 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+def f(k: ns.bash.Kwargs) -> int:
+    n = 0
+    if "run" in k:
+        n += 1
+    merged = k | {"count": 2}
+    merged_rhs = {"run": "x"} | k
+    r = k["run"]
+    for key in k:
+        n += len(key)
+    got = k.get("run")
+    return n + len(merged) + len(merged_rhs)
+
+f({"run": "echo", "count": 1})
+
+No errors.
+
+Types:
+merged: dict[str, None | int | str | list[str]]
+merged_rhs: dict[str, str] | typed_kwargs(count = int, deps = None | list[str], name = str, run = str)
+r: None | int | str | list[str]
+key: str
+got: None | int | str | list[str]
+
+Compiler typechecker (eval):
+No errors.

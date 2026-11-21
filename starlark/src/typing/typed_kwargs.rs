@@ -44,6 +44,8 @@ use starlark_map::sorted_map::SortedMap;
 use crate as starlark;
 use crate::typing::Ty;
 use crate::typing::TyBasic;
+use crate::typing::TypingBinOp;
+use crate::typing::arc_ty::ArcTy;
 use crate::typing::custom::TyCustomDyn;
 use crate::typing::custom::TyCustomImpl;
 use crate::typing::error::TypingNoContextError;
@@ -107,6 +109,11 @@ impl TyTypedKwargs {
         Ty::unions(self.fields.values().cloned().collect())
     }
 
+    /// The dict type this is outside `**kwargs`.
+    fn as_dict(&self) -> TyBasic {
+        TyBasic::dict(Ty::string(), self.value_ty())
+    }
+
     /// Why `value` is not a dict of this type, naming the offending key; `None`
     /// if it is not a dict at all (or matches), and the generic message applies.
     pub(crate) fn mismatch(&self, value: Value, arg_name: &str) -> Option<String> {
@@ -143,22 +150,37 @@ impl TyCustomImpl for TyTypedKwargs {
         Some("dict")
     }
 
+    // Outside `**kwargs` this is a `dict[str, <union of the key types>]`, and
+    // every operation answers exactly as that dict type does: the typechecker
+    // must not refuse what evaluation accepts.
+
+    fn bin_op(
+        &self,
+        bin_op: TypingBinOp,
+        rhs: &TyBasic,
+        ctx: &TypingOracleCtx,
+    ) -> Result<Ty, TypingNoContextOrInternalError> {
+        ctx.bin_op_basic(&self.as_dict(), bin_op, rhs)
+    }
+
     fn iter_item(&self) -> Result<Ty, TypingNoContextError> {
         Ok(Ty::string())
     }
 
     fn index(
         &self,
-        _item: &TyBasic,
-        _ctx: &TypingOracleCtx,
+        item: &TyBasic,
+        ctx: &TypingOracleCtx,
     ) -> Result<Ty, TypingNoContextOrInternalError> {
-        Ok(self.value_ty())
+        ctx.index_basic(&self.as_dict(), item)
     }
 
-    fn attribute(&self, _attr: &str) -> Result<Ty, TypingNoContextError> {
-        // A dict's methods. Lenient rather than wrong: the typechecker must
-        // not refuse what evaluation accepts.
-        Ok(Ty::any())
+    fn attribute(&self, attr: &str) -> Result<Ty, TypingNoContextError> {
+        TypingOracleCtx::dict_attr(
+            &ArcTy::new(Ty::string()),
+            &ArcTy::new(self.value_ty()),
+            attr,
+        )
     }
 
     fn intersects_with(&self, other: &TyBasic) -> bool {

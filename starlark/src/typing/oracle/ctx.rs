@@ -29,6 +29,7 @@ use crate::typing::ParamSpec;
 use crate::typing::Ty;
 use crate::typing::TypingBinOp;
 use crate::typing::TypingUnOp;
+use crate::typing::arc_ty::ArcTy;
 use crate::typing::basic::TyBasic;
 use crate::typing::call_args::TyCallArgs;
 use crate::typing::callable::TyCallable;
@@ -459,6 +460,41 @@ impl<'a> TypingOracleCtx<'a> {
         }
     }
 
+    /// Type of `d.attr` for `d: dict[tk, tv]`.
+    pub(crate) fn dict_attr(
+        tk: &ArcTy,
+        tv: &ArcTy,
+        attr: &str,
+    ) -> Result<Ty, TypingNoContextError> {
+        match attr {
+            "get" => Ok(Ty::union2(
+                Ty::function(
+                    ParamSpec::pos_only([tk.to_ty()], []),
+                    Ty::union2(tv.to_ty(), Ty::none()),
+                ),
+                // This second signature is a bit too lax, but get with a default is much rarer
+                Ty::function(ParamSpec::pos_only([tk.to_ty(), Ty::any()], []), Ty::any()),
+            )),
+            "keys" => Ok(Ty::function(
+                ParamSpec::empty(),
+                Ty::basic(TyBasic::List(tk.dupe())),
+            )),
+            "values" => Ok(Ty::function(
+                ParamSpec::empty(),
+                Ty::basic(TyBasic::List(tv.dupe())),
+            )),
+            "items" => Ok(Ty::function(
+                ParamSpec::empty(),
+                Ty::list(Ty::tuple(vec![tk.to_ty(), tv.to_ty()])),
+            )),
+            "popitem" => Ok(Ty::function(
+                ParamSpec::empty(),
+                Ty::tuple(vec![tk.to_ty(), tv.to_ty()]),
+            )),
+            attr => TyStarlarkValue::new::<MutableDict>().attr(attr),
+        }
+    }
+
     fn expr_dot_basic(&self, array: &TyBasic, attr: &str) -> Result<Ty, TypingNoContextError> {
         match array {
             TyBasic::Any | TyBasic::Callable(_) | TyBasic::Iter(_) | TyBasic::Type => Ok(Ty::any()),
@@ -479,35 +515,7 @@ impl<'a> TypingOracleCtx<'a> {
                 )),
                 attr => TyStarlarkValue::new::<List>().attr(attr),
             },
-            TyBasic::Dict(tk, tv) => {
-                match attr {
-                    "get" => Ok(Ty::union2(
-                        Ty::function(
-                            ParamSpec::pos_only([tk.to_ty()], []),
-                            Ty::union2(tv.to_ty(), Ty::none()),
-                        ),
-                        // This second signature is a bit too lax, but get with a default is much rarer
-                        Ty::function(ParamSpec::pos_only([tk.to_ty(), Ty::any()], []), Ty::any()),
-                    )),
-                    "keys" => Ok(Ty::function(
-                        ParamSpec::empty(),
-                        Ty::basic(TyBasic::List(tk.dupe())),
-                    )),
-                    "values" => Ok(Ty::function(
-                        ParamSpec::empty(),
-                        Ty::basic(TyBasic::List(tv.dupe())),
-                    )),
-                    "items" => Ok(Ty::function(
-                        ParamSpec::empty(),
-                        Ty::list(Ty::tuple(vec![tk.to_ty(), tv.to_ty()])),
-                    )),
-                    "popitem" => Ok(Ty::function(
-                        ParamSpec::empty(),
-                        Ty::tuple(vec![tk.to_ty(), tv.to_ty()]),
-                    )),
-                    attr => TyStarlarkValue::new::<MutableDict>().attr(attr),
-                }
-            }
+            TyBasic::Dict(tk, tv) => Self::dict_attr(tk, tv, attr),
             TyBasic::Custom(custom) => custom.0.attribute_dyn(attr),
             //TODO(romanp) add match on attr similar to Dict
             TyBasic::Set(_) => TyStarlarkValue::new::<MutableSet>().attr(attr),
@@ -648,6 +656,38 @@ impl<'a> TypingOracleCtx<'a> {
                 bin_op => Ok(TyStarlarkValue::new::<MutableSet>().bin_op(bin_op, rhs.node)?),
             },
         }
+    }
+
+    /// `lhs <op> rhs`, for a custom type to answer as the type it behaves as.
+    pub(crate) fn bin_op_basic(
+        &self,
+        lhs: &TyBasic,
+        bin_op: TypingBinOp,
+        rhs: &TyBasic,
+    ) -> Result<Ty, TypingNoContextOrInternalError> {
+        self.expr_bin_op_ty_basic_lhs(
+            lhs,
+            bin_op,
+            Spanned {
+                span: Span::default(),
+                node: rhs,
+            },
+        )
+    }
+
+    /// `array[index]`, for a custom type to answer as the type it behaves as.
+    pub(crate) fn index_basic(
+        &self,
+        array: &TyBasic,
+        index: &TyBasic,
+    ) -> Result<Ty, TypingNoContextOrInternalError> {
+        self.expr_index_ty(
+            array,
+            Spanned {
+                span: Span::default(),
+                node: index,
+            },
+        )
     }
 
     fn expr_bin_op_ty_basic_rhs(
