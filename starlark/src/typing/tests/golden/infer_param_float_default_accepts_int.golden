@@ -1,0 +1,21 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+def f(scale = 1.0, neg = -1.5, pos = +1.5):
+    v = scale
+
+def g():
+    f(2, 3, 4)
+    f(2.5, -3.5, 4.5)
+
+No errors.
+
+Types:
+v: float | int
+
+Compiler typechecker (eval):
+No errors.

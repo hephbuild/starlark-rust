@@ -177,3 +177,22 @@ def g():
 "#,
         );
 }
+
+#[test]
+fn test_infer_return_def_bound_twice_is_not_inferred() {
+    // Both `def`s have the same signature, so both match the declared type;
+    // neither one's returns may decide the type of the name.
+    TypeCheck::new().check(
+        "infer_return_def_bound_twice_is_not_inferred",
+        r#"
+def f():
+    return 1
+
+def f():
+    return "s"
+
+def use():
+    s: str = f()
+"#,
+    );
+}

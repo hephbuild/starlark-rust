@@ -169,21 +169,20 @@ pub(crate) fn solve_bindings(
     ))
 }
 
-/// The module slot a top-level `def` binds.
+/// The module slot a top-level `def` binds, and whether it lacks a return
+/// annotation.
 fn def_module_slot(
     stmt: &CstStmt,
     scope_data: &ModuleScopeData,
     codemap: &CodeMap,
-) -> Result<Option<ModuleSlotId>, InternalError> {
+) -> Result<Option<(ModuleSlotId, bool)>, InternalError> {
     let StmtP::Def(def) = &**stmt else {
         return Ok(None);
     };
-    if def.return_type.is_some() {
-        return Ok(None);
-    }
+    let unannotated = def.return_type.is_none();
     let binding_id = def.name.resolved_binding_id(codemap)?;
     match scope_data.get_binding(binding_id).resolved_slot(codemap)? {
-        Slot::Module(slot) => Ok(Some(slot)),
+        Slot::Module(slot) => Ok(Some((slot, unannotated))),
         Slot::Local(_) => Err(InternalError::msg(
             "top-level def bound to a local slot",
             def.name.span,
@@ -217,10 +216,22 @@ fn infer_top_level_returns(
     // The final pass over each `def` collects and reports approximations;
     // the rounds here would only repeat them.
     let mut ignored_approximations = Vec::new();
+    // A name bound by two top-level `def`s keeps its declared type: with
+    // identical signatures both match `declared` below, and the first one's
+    // returns would win although the second is the one bound at the end.
+    let mut def_count: HashMap<ModuleSlotId, usize> = HashMap::new();
+    for stmt in cst.iter() {
+        if let Some((slot, _)) = def_module_slot(stmt, scope_data, codemap)? {
+            *def_count.entry(slot).or_default() += 1;
+        }
+    }
     for (i, stmt) in cst.iter_mut().enumerate() {
-        let Some(slot) = def_module_slot(stmt, scope_data, codemap)? else {
+        let Some((slot, true)) = def_module_slot(stmt, scope_data, codemap)? else {
             continue;
         };
+        if def_count.get(&slot) != Some(&1) {
+            continue;
+        }
         let collected = BindingsCollect::collect_one(
             stmt,
             TypecheckMode::Lint,
@@ -232,7 +243,7 @@ fn infer_top_level_returns(
         };
         let declared = Ty::function(infer.params.dupe(), Ty::any());
         if module_var_types.types.get(&slot) != Some(&declared) {
-            // The name is also bound by an assignment, a `for`, or a second `def`.
+            // The name is also bound by an assignment or a `for`.
             continue;
         }
         module_var_types

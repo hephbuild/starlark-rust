@@ -1,0 +1,25 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+def f(n = 1):
+    return n
+
+def g():
+    s: str = f()
+
+Error:
+error: Expected type `str` but got `int`
+ --> filename:6:8
+  |
+6 |     s: str = f()
+  |        ^^^
+  |
+
+Compiler typechecker (eval):
+Compiler typechecker and eval results mismatch.
+
+No errors.

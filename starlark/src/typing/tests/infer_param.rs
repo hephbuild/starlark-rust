@@ -105,6 +105,103 @@ def g():
 }
 
 #[test]
+fn test_infer_param_float_default_accepts_int() {
+    TypeCheck::new().ty("v").check(
+        "infer_param_float_default_accepts_int",
+        r#"
+def f(scale = 1.0, neg = -1.5, pos = +1.5):
+    v = scale
+
+def g():
+    f(2, 3, 4)
+    f(2.5, -3.5, 4.5)
+"#,
+    );
+}
+
+#[test]
+fn test_infer_param_int_default_rejects_bool() {
+    TypeCheck::new().check(
+        "infer_param_int_default_rejects_bool",
+        r#"
+def f(n = 1):
+    pass
+
+def g():
+    f(True)
+"#,
+    );
+}
+
+#[test]
+fn test_infer_param_int_default_rejects_float() {
+    TypeCheck::new().check(
+        "infer_param_int_default_rejects_float",
+        r#"
+def f(n = 1):
+    pass
+
+def g():
+    f(1.5)
+"#,
+    );
+}
+
+#[test]
+fn test_infer_param_str_default_rejects_none() {
+    TypeCheck::new().check(
+        "infer_param_str_default_rejects_none",
+        r#"
+def f(name = ""):
+    pass
+
+def g():
+    f(None)
+"#,
+    );
+}
+
+#[test]
+fn test_infer_param_body_rebinding() {
+    TypeCheck::new().ty("v").check(
+        "infer_param_body_rebinding",
+        r#"
+def f(n = 1):
+    n = "a"
+    v = n
+"#,
+    );
+}
+
+#[test]
+fn test_infer_param_return_inference_through_param() {
+    TypeCheck::new().check(
+        "infer_param_return_inference_through_param",
+        r#"
+def f(n = 1):
+    return n
+
+def g():
+    s: str = f()
+"#,
+    );
+}
+
+#[test]
+fn test_infer_param_concrete_annotation_wins() {
+    TypeCheck::new().check(
+        "infer_param_concrete_annotation_wins",
+        r#"
+def f(x: str = "a"):
+    pass
+
+def g():
+    f(1)
+"#,
+    );
+}
+
+#[test]
 fn test_infer_param_annotation_wins() {
     TypeCheck::new().check(
         "infer_param_annotation_wins",

@@ -17,9 +17,6 @@ error: Expected type `str` but got `int`
   |
 
 Compiler typechecker (eval):
-error: Expected type `str` but got `int`
- --> filename:3:8
-  |
-3 |     s: str = n
-  |        ^^^
-  |
+Compiler typechecker and eval results mismatch.
+
+No errors.

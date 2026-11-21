@@ -20,7 +20,7 @@ No errors.
 Types:
 i: int
 neg: int
-fl: float
+fl: float | int
 s: str
 b: bool
 l: list

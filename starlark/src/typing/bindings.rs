@@ -166,21 +166,27 @@ fn is_global_fail_call(expr: &CstExpr) -> bool {
 }
 
 /// The type an unannotated parameter takes from its default, when the
-/// default is a literal: `1` is `int`, `-1.5` is `float`, `"s"` is `str`,
-/// `True` is `bool`, and `[...]`, `{...}`, `(...)` are a list, dict or tuple
-/// of `Any`. A container's elements are not inferred: `x = []` is filled in
-/// later by callers, and `["a"]` is an example, not a schema.
+/// default is a literal: `1` is `int`, `-1.5` is `int | float`, `"s"` is
+/// `str`, `True` is `bool`, and `[...]`, `{...}`, `(...)` are a list, dict or
+/// tuple of `Any`. A container's elements are not inferred: `x = []` is
+/// filled in later by callers, and `["a"]` is an example, not a schema.
+///
+/// A float default takes `int | float`, not `float`: `scale = 1.0` reads as
+/// "a number", and refusing `f(2)` would be noise. An int default stays
+/// `int`.
 ///
 /// `None` infers nothing: `x = None` means "optional something", and typing
 /// it `None` would refuse every real argument. Any other expression infers
 /// nothing either; the parameter stays `Any`.
 ///
-/// The body (`visit_def`) and the module-level type callers are checked
-/// against (`fill_types_for_lint`) both take parameter types from here.
+/// Only the lint typechecker uses this: the body (`visit_def`, in
+/// `TypecheckMode::Lint`) and the module-level type callers are checked
+/// against (`fill_types_for_lint`) both take parameter types from here. The
+/// compiler typechecker keeps `Any`, so evaluation is unchanged.
 pub(crate) fn literal_default_ty(expr: &CstExpr) -> Option<Ty> {
     let number = |expr: &CstExpr| match &**expr {
         ExprP::Literal(AstLiteral::Int(_)) => Some(Ty::int()),
-        ExprP::Literal(AstLiteral::Float(_)) => Some(Ty::float()),
+        ExprP::Literal(AstLiteral::Float(_)) => Some(Ty::union2(Ty::int(), Ty::float())),
         _ => None,
     };
     match &**expr {
@@ -344,11 +350,11 @@ impl<'a, 'b> BindingsCollect<'a, 'b> {
 
         for p in params {
             let name = &p.node.ident;
-            let ty = match (p.node.ty, &p.node.kind) {
-                (None, DefParamKind::Regular(_, Some(default))) => {
+            let ty = match (p.node.ty, &p.node.kind, typecheck_mode) {
+                (None, DefParamKind::Regular(_, Some(default)), TypecheckMode::Lint) => {
                     literal_default_ty(default).unwrap_or_else(Ty::any)
                 }
-                (ty, _) => Self::resolve_ty_opt(ty, typecheck_mode, codemap)?,
+                (ty, ..) => Self::resolve_ty_opt(ty, typecheck_mode, codemap)?,
             };
             let name_ty = match &p.node.kind {
                 DefParamKind::Regular(mode, default_value) => {

@@ -1,0 +1,25 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+def f(n = 1):
+    pass
+
+def g():
+    f(True)
+
+Error:
+error: Expected type `int` but got `bool`
+ --> filename:6:7
+  |
+6 |     f(True)
+  |       ^^^^
+  |
+
+Compiler typechecker (eval):
+Compiler typechecker and eval results mismatch.
+
+No errors.
