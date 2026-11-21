@@ -1,0 +1,25 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+def target(name: str, run: str = "", count: int = 0, deps: list[str] | None = None):
+    pass
+
+def f(name: str, **kwargs: ns.bash.Kwargs):
+    target(name = name, **kwargs)
+
+def f2(name: str, **kwargs: ns.bash.Kwargs):
+    f(name = name, **kwargs)
+
+def g():
+    f2(name = "a", run = "echo", count = 1)
+
+g()
+
+No errors.
+
+Compiler typechecker (eval):
+No errors.

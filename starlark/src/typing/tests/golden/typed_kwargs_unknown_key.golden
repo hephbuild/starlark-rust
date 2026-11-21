@@ -1,0 +1,28 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+def f(name: str, **kwargs: ns.bash.Kwargs):
+    pass
+
+def g():
+    f(name = "a", rnu = "echo")
+
+Error:
+error: Unexpected parameter named `rnu`
+ --> filename:6:19
+  |
+6 |     f(name = "a", rnu = "echo")
+  |                   ^^^^^^^^^^^^
+  |
+
+Compiler typechecker (eval):
+error: Unexpected parameter named `rnu`
+ --> filename:6:19
+  |
+6 |     f(name = "a", rnu = "echo")
+  |                   ^^^^^^^^^^^^
+  |

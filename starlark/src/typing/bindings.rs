@@ -48,6 +48,7 @@ use crate::eval::compiler::scope::payload::CstStmt;
 use crate::eval::compiler::scope::payload::CstTypeExpr;
 use crate::typing::ParamSpec;
 use crate::typing::TyBasic;
+use crate::typing::TyTypedKwargs;
 use crate::typing::arc_ty::ArcTy;
 use crate::typing::callable_param::ParamIsRequired;
 use crate::typing::error::InternalError;
@@ -390,7 +391,13 @@ impl<'a, 'b> BindingsCollect<'a, 'b> {
                     Some((name, Ty::basic(TyBasic::Tuple(TyTuple::Of(ArcTy::new(ty))))))
                 }
                 DefParamKind::Kwargs => {
-                    let var_ty = Ty::dict(Ty::string(), ty.clone());
+                    // Inside the body, typed kwargs are a dict of any one
+                    // key's type.
+                    let value_ty = match TyTypedKwargs::from_ty(&ty) {
+                        Some(typed) => typed.value_ty(),
+                        None => ty.clone(),
+                    };
+                    let var_ty = Ty::dict(Ty::string(), value_ty);
                     kwargs = Some(ty.dupe());
                     Some((name, var_ty))
                 }

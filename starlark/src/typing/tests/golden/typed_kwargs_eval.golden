@@ -1,0 +1,49 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+f(name = "a", run = "echo", count = 1, deps = None)
+
+No errors.
+
+Code:
+f(name = "a", rnu = "echo")
+
+Traceback (most recent call last):
+  * filename:3, in <module>
+      f(name = "a", rnu = "echo")
+error: Unexpected key `rnu` for argument `kwargs`; known keys: `count`, `deps`, `name`, `run`
+ --> filename:3:1
+  |
+3 | f(name = "a", rnu = "echo")
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+
+Code:
+f(name = "a", run = 1)
+
+Traceback (most recent call last):
+  * filename:3, in <module>
+      f(name = "a", run = 1)
+error: Value `1` of type `int` for key `run` does not match the type annotation `str` for argument `kwargs`
+ --> filename:3:1
+  |
+3 | f(name = "a", run = 1)
+  | ^^^^^^^^^^^^^^^^^^^^^^
+  |
+
+Code:
+f(name = "a", deps = [1])
+
+Traceback (most recent call last):
+  * filename:3, in <module>
+      f(name = "a", deps = [1])
+error: Value `[1]` of type `list` for key `deps` does not match the type annotation `None | list[str]` for argument `kwargs`
+ --> filename:3:1
+  |
+3 | f(name = "a", deps = [1])
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^
+  |

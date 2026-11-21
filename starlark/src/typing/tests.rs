@@ -31,6 +31,7 @@ use starlark_syntax::golden_test_template::golden_test_template;
 use crate as starlark;
 use crate::assert::Assert;
 use crate::environment::FrozenModule;
+use crate::environment::Globals;
 use crate::environment::GlobalsBuilder;
 use crate::environment::Module;
 use crate::eval::Evaluator;
@@ -62,6 +63,7 @@ mod infer_return;
 mod list;
 mod special_function;
 mod tuple;
+mod typed_kwargs;
 mod types;
 
 #[derive(Default)]
@@ -139,6 +141,13 @@ fn register_typecheck_globals(globals: &mut GlobalsBuilder) {
     }
 }
 
+fn typecheck_globals() -> Globals {
+    GlobalsBuilder::extended()
+        .with(register_typecheck_globals)
+        .with(typed_kwargs::register_typed_kwargs_globals)
+        .build()
+}
+
 impl TypeCheck {
     fn new() -> Self {
         Self::default()
@@ -164,9 +173,7 @@ impl TypeCheck {
     }
 
     fn check(&self, test_name: &str, code: &str) -> (Interface, FrozenModule) {
-        let globals = GlobalsBuilder::extended()
-            .with(register_typecheck_globals)
-            .build();
+        let globals = typecheck_globals();
         let ast =
             AstModule::parse("filename", code.to_owned(), &Dialect::AllOptionsInternal).unwrap();
         let (errors, typemap, interface, approximations) = ast.clone().typecheck(

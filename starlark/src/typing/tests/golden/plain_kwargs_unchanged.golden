@@ -1,0 +1,32 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+def f(**kwargs: int):
+    kw = kwargs
+
+def g():
+    f(a = 1)
+    f(b = "x")
+
+Error:
+error: Expected type `int` but got `str`
+ --> filename:7:7
+  |
+7 |     f(b = "x")
+  |       ^^^^^^^
+  |
+
+Types:
+kw: dict[str, int]
+
+Compiler typechecker (eval):
+error: Expected type `int` but got `str`
+ --> filename:7:7
+  |
+7 |     f(b = "x")
+  |       ^^^^^^^
+  |

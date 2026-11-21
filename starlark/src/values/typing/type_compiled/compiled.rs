@@ -44,6 +44,7 @@ use crate::pagable::static_value::TypeCompiledStaticRegistered;
 use crate::pagable::static_value::static_type_compiled;
 use crate::private::Private;
 use crate::typing::Ty;
+use crate::typing::TyTypedKwargs;
 use crate::values::AllocStaticSimple;
 use crate::values::AllocValue;
 use crate::values::Demand;
@@ -76,6 +77,9 @@ enum TypingError {
     /// The value does not have the specified type
     #[error("Value `{0}` of type `{1}` does not match the type annotation `{2}` for {3}")]
     TypeAnnotationMismatch(String, String, String, String),
+    /// A typed-kwargs dict has an unknown key or a value its key's type rejects.
+    #[error("{0}")]
+    TypedKwargsMismatch(String),
     /// The given type annotation does not represent a type
     #[error("Type `{0}` is not a valid type annotation")]
     InvalidTypeAnnotation(String),
@@ -354,6 +358,14 @@ impl<'v, V: ValueLike<'v>> TypeCompiled<V> {
     #[cold]
     #[inline(never)]
     fn check_type_error(self, value: Value<'v>, arg_name: Option<&str>) -> crate::Result<()> {
+        // Typed kwargs: name the key that failed.
+        let typed_kwargs_mismatch = arg_name
+            .and_then(|arg_name| TyTypedKwargs::from_ty(self.as_ty())?.mismatch(value, arg_name));
+        if let Some(msg) = typed_kwargs_mismatch {
+            return Err(crate::Error::new_other(TypingError::TypedKwargsMismatch(
+                msg,
+            )));
+        }
         Err(crate::Error::new_other(
             TypingError::TypeAnnotationMismatch(
                 value.to_str(),

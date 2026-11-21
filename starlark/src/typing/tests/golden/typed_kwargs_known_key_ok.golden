@@ -1,0 +1,23 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+def f(name: str, **kwargs: ns.bash.Kwargs):
+    kw = kwargs
+
+def g():
+    f(name = "a")
+    f(name = "a", run = "echo")
+    f(name = "a", run = "echo", count = 1, deps = ["x"])
+    f(name = "a", deps = None)
+
+No errors.
+
+Types:
+kw: dict[str, None | int | str | list[str]]
+
+Compiler typechecker (eval):
+No errors.

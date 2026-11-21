@@ -43,6 +43,7 @@ pub(crate) mod structs;
 pub(crate) mod tuple;
 pub(crate) mod ty;
 pub(crate) mod typecheck;
+pub(crate) mod typed_kwargs;
 pub(crate) mod user;
 
 pub mod macro_support;
@@ -67,6 +68,7 @@ pub use ty::Ty;
 pub use ty::TypeRenderConfig;
 pub use typecheck::AstModuleTypecheck;
 pub use typecheck::TypeMap;
+pub use typed_kwargs::TyTypedKwargs;
 pub use user::TyUser;
 pub use user::TyUserFields;
 pub use user::TyUserIndex;

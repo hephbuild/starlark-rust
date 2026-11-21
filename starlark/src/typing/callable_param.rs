@@ -32,6 +32,7 @@ use crate::eval::runtime::params::display::PARAM_FMT_OPTIONAL;
 use crate::eval::runtime::params::display::ParamFmt;
 use crate::eval::runtime::params::display::fmt_param_spec;
 use crate::typing::Ty;
+use crate::typing::TyTypedKwargs;
 use crate::typing::small_arc_vec::SmallArcVec1;
 use crate::typing::ty::TyDisplay;
 use crate::typing::ty::TypeRenderConfig;
@@ -211,6 +212,9 @@ impl ParamSpec {
     }
 
     /// Create a new parameter specification from different parameter kinds in order.
+    ///
+    /// A `kwargs` of [`TyTypedKwargs`] becomes one optional named-only
+    /// parameter per key not already named, and no `**` parameter.
     pub fn new_parts(
         pos_only: impl IntoIterator<Item = (ParamIsRequired, Ty)>,
         pos_or_name: impl IntoIterator<Item = (ArcStr, ParamIsRequired, Ty)>,
@@ -274,11 +278,25 @@ impl ParamSpec {
 
         let mut index_of_kwargs = None;
         if let Some(ty) = kwargs {
-            index_of_kwargs = Some(params.len() as u32);
-            params.push(Param {
-                mode: ParamMode::Kwargs,
-                ty,
-            });
+            if let Some(typed) = TyTypedKwargs::from_ty(&ty) {
+                // `**kwargs: <typed kwargs>`: one optional named-only parameter
+                // per key, and no catch-all, so an unknown key is an error. A
+                // key named like an explicit parameter is that parameter's.
+                for (name, ty) in typed.fields_arc() {
+                    if seen_names.insert(name.dupe()) {
+                        params.push(Param {
+                            mode: ParamMode::NameOnly(name.dupe(), ParamIsRequired::No),
+                            ty: ty.dupe(),
+                        });
+                    }
+                }
+            } else {
+                index_of_kwargs = Some(params.len() as u32);
+                params.push(Param {
+                    mode: ParamMode::Kwargs,
+                    ty,
+                });
+            }
         }
 
         Ok(ParamSpec {
