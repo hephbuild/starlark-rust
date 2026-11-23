@@ -18,7 +18,10 @@
 // This is not public API, but it is used by Starlark command line utility.
 #![doc(hidden)]
 
-#[cfg(not(target_arch = "wasm32"))]
+// hephbuild: rustyline is behind the `repl` feature, off by default. Without
+// it, `ReadLine` is the stub wasm32 always had: the terminal breakpoint console
+// errors instead of reading a line.
+#[cfg(all(feature = "repl", not(target_arch = "wasm32")))]
 mod with_or_without_rustyline {
     use std::env;
     use std::io;
@@ -70,10 +73,10 @@ mod with_or_without_rustyline {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(not(all(feature = "repl", not(target_arch = "wasm32"))))]
 mod with_or_without_rustyline {
     #[derive(thiserror::Error, Debug)]
-    #[error("Rustyline is not supported on wasm32")]
+    #[error("Rustyline is not supported on wasm32, or without the `repl` feature")]
     struct NoRustyline;
 
     pub struct ReadLine(());

@@ -16,9 +16,14 @@
  */
 
 //! Provides debug-related functionality and utilities.
+// hephbuild: the Debug Adapter Protocol types (`debugserver-types`, whose
+// schemafy codegen is one of the slowest proc macros in an embedder's build)
+// are behind the `dap` feature, off by default.
+#[cfg(feature = "dap")]
 mod adapter;
 
 mod evaluate;
 mod inspect;
 
+#[cfg(feature = "dap")]
 pub use adapter::*;

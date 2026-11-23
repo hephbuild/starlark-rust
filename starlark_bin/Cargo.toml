@@ -16,7 +16,7 @@ version = "0.14.2"
 [dependencies]
 dupe = { workspace = true }
 
-starlark = { version = "0.14.2", path = "../starlark" }
+starlark = { version = "0.14.2", path = "../starlark", features = ["dap", "repl"] }
 starlark_lsp = { version = "0.14.2", path = "../starlark_lsp" }
 starlark_map = { version = "0.14.2", path = "../starlark_map" }
 
