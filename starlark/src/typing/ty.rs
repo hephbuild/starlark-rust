@@ -49,9 +49,12 @@ use crate::typing::small_arc_vec::SmallArcVec1;
 use crate::typing::starlark_value::TyStarlarkValue;
 use crate::typing::structs::TyStruct;
 use crate::typing::tuple::TyTuple;
+use crate::typing::typed_kwargs::TyTypedKwargs;
+use crate::typing::user::TyUser;
 use crate::values::StarlarkValue;
 use crate::values::Value;
 use crate::values::bool::StarlarkBool;
+use crate::values::typing::TypeInstanceId;
 use crate::values::typing::never::TypingNever;
 
 /// A typing operation wasn't able to produce a precise result,
@@ -491,6 +494,60 @@ impl Ty {
             return false;
         };
         ok
+    }
+
+    /// The identity of each user type ([`TyUser`](crate::typing::TyUser), a
+    /// record or an enum) this type names, in the order its display names
+    /// them, each once.
+    ///
+    /// It walks what the display prints: union alternatives, list, set,
+    /// `Iter` and dict elements, tuple elements, a callable's parameters and
+    /// result, the fields of typed kwargs and of a struct. A user type's own
+    /// fields are not printed (`Lib`, not its fields), so they are not walked;
+    /// but a type's own type is (`record[Lib]` and `enum[Mode]` name `Lib`
+    /// and `Mode`), through the result of its constructor.
+    pub fn user_type_ids(&self) -> Vec<TypeInstanceId> {
+        let mut ids = Vec::new();
+        self.collect_user_type_ids(&mut ids);
+        ids
+    }
+
+    pub(crate) fn collect_user_type_ids(&self, ids: &mut Vec<TypeInstanceId>) {
+        for basic in self.iter_union() {
+            match basic {
+                TyBasic::Any | TyBasic::StarlarkValue(_) | TyBasic::Type => {}
+                TyBasic::Iter(x) | TyBasic::List(x) | TyBasic::Set(x) => {
+                    x.collect_user_type_ids(ids)
+                }
+                TyBasic::Dict(k, v) => {
+                    k.collect_user_type_ids(ids);
+                    v.collect_user_type_ids(ids);
+                }
+                TyBasic::Tuple(TyTuple::Elems(xs)) => {
+                    for x in xs.iter() {
+                        x.collect_user_type_ids(ids);
+                    }
+                }
+                TyBasic::Tuple(TyTuple::Of(x)) => x.collect_user_type_ids(ids),
+                TyBasic::Callable(c) => c.collect_user_type_ids(ids),
+                TyBasic::Custom(c) => {
+                    let any = c.0.as_any();
+                    if let Some(user) = any.downcast_ref::<TyUser>() {
+                        user.collect_user_type_ids(ids);
+                    } else if let Some(kwargs) = any.downcast_ref::<TyTypedKwargs>() {
+                        for (_, ty) in kwargs.fields() {
+                            ty.collect_user_type_ids(ids);
+                        }
+                    } else if let Some(s) = any.downcast_ref::<TyStruct>() {
+                        for ty in s.fields.values() {
+                            ty.collect_user_type_ids(ids);
+                        }
+                    } else if let Some(c) = c.0.as_callable_dyn() {
+                        c.collect_user_type_ids(ids);
+                    }
+                }
+            }
+        }
     }
 
     pub(crate) fn check_intersects(&self, other: &Ty) -> crate::Result<bool> {

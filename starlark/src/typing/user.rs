@@ -183,6 +183,18 @@ impl TyUser {
             iter_item,
         })
     }
+
+    /// [`Ty::user_type_ids`] of this type: its own id, then, for a type's own
+    /// type (`record[Lib]`, `enum[Mode]`), the ids its constructor returns.
+    /// Its fields are not walked: the type prints as its name alone.
+    pub(crate) fn collect_user_type_ids(&self, ids: &mut Vec<TypeInstanceId>) {
+        if !ids.contains(&self.id) {
+            ids.push(self.id);
+        }
+        if let Some(callable) = &self.callable {
+            callable.result().collect_user_type_ids(ids);
+        }
+    }
 }
 
 impl PartialEq for TyUser {

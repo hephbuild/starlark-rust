@@ -16,4 +16,6 @@
  */
 
 pub(crate) mod ctx;
+#[cfg(test)]
+mod error_types_tests;
 pub(crate) mod traits;

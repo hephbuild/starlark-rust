@@ -60,6 +60,7 @@ pub use function::TyFunction;
 pub use interface::Interface;
 pub use members::members;
 pub use oracle::ctx::TypingOracleCtx;
+pub use oracle::ctx::error_types;
 pub use oracle::traits::TypingBinOp;
 pub use oracle::traits::TypingUnOp;
 pub use starlark_value::HasTyVTable;

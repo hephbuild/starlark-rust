@@ -30,6 +30,7 @@ use crate::typing::TypingOracleCtx;
 use crate::typing::call_args::TyCallArgs;
 use crate::typing::error::TypingOrInternalError;
 use crate::typing::ty::TypeRenderConfig;
+use crate::values::typing::TypeInstanceId;
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Allocative, Pagable)]
 struct TyCallableInner {
@@ -68,6 +69,14 @@ impl TyCallable {
 
     pub(crate) fn result(&self) -> &Ty {
         &self.inner.result
+    }
+
+    /// [`Ty::user_type_ids`] of the parameters, then of the result.
+    pub(crate) fn collect_user_type_ids(&self, ids: &mut Vec<TypeInstanceId>) {
+        for param in self.params().params() {
+            param.ty.collect_user_type_ids(ids);
+        }
+        self.result().collect_user_type_ids(ids);
     }
 
     pub(crate) fn any() -> TyCallable {

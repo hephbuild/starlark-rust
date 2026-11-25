@@ -47,12 +47,14 @@ use crate::values::list::value::List;
 use crate::values::set::value::MutableSet;
 use crate::values::tuple::value::Tuple;
 
+/// A type error. A type a message mentions is carried as a [`Ty`], not as
+/// text, so [`error_types`] can say which types an error is about.
 #[derive(Debug, thiserror::Error)]
-enum TypingOracleCtxError {
+pub(crate) enum TypingOracleCtxError {
     #[error("Expected type `{require}` but got `{got}`")]
-    IncompatibleType { got: String, require: String },
+    IncompatibleType { got: Ty, require: Ty },
     #[error("Call to a non-callable type `{ty}`")]
-    CallToNonCallable { ty: String },
+    CallToNonCallable { ty: Ty },
     #[error("Missing required parameter `{name}`")]
     MissingRequiredParameter { name: String },
     #[error("Unexpected parameter named `{name}`")]
@@ -77,6 +79,51 @@ enum TypingOracleCtxError {
         left: Ty,
         right: Ty,
     },
+}
+
+impl TypingOracleCtxError {
+    /// The types the message mentions, in the order it mentions them.
+    pub(crate) fn types(&self) -> Vec<Ty> {
+        match self {
+            TypingOracleCtxError::IncompatibleType { got, require } => {
+                vec![require.dupe(), got.dupe()]
+            }
+            TypingOracleCtxError::CallToNonCallable { ty }
+            | TypingOracleCtxError::MissingSliceOperator { ty }
+            | TypingOracleCtxError::AttributeNotAvailable { ty, attr: _ }
+            | TypingOracleCtxError::NotIterable { ty }
+            | TypingOracleCtxError::UnaryOperatorNotAvailable { ty, un_op: _ } => vec![ty.dupe()],
+            TypingOracleCtxError::CallArgumentsIncompatible { fun } => vec![fun.dupe()],
+            TypingOracleCtxError::MissingIndexOperator { ty, index } => {
+                vec![ty.dupe(), index.dupe()]
+            }
+            TypingOracleCtxError::BinaryOperatorNotAvailable {
+                bin_op: _,
+                left,
+                right,
+            } => vec![left.dupe(), right.dupe()],
+            TypingOracleCtxError::MissingRequiredParameter { name: _ }
+            | TypingOracleCtxError::UnexpectedNamedArgument { name: _ }
+            | TypingOracleCtxError::TooManyPositionalArguments => Vec::new(),
+        }
+    }
+}
+
+/// The types a typechecker error mentions, in the order its message mentions
+/// them: `[Lib, int]` for ``Expected type `Lib` but got `int` ``.
+///
+/// It reads the error's typed payload, never its text, so an attribute or
+/// parameter name that happens to spell a type is not one. An error the
+/// typechecker built from a plain message, or any other error, mentions none.
+pub fn error_types(error: &crate::Error) -> Vec<Ty> {
+    match error.kind() {
+        crate::ErrorKind::Other(e) => e
+            .chain()
+            .find_map(|e| e.downcast_ref::<TypingOracleCtxError>())
+            .map(TypingOracleCtxError::types)
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
 }
 
 /// Oracle reference with utility methods.
@@ -134,8 +181,8 @@ impl<'a> TypingOracleCtx<'a> {
             Err(self.mk_error_as_maybe_internal(
                 got.span,
                 TypingOracleCtxError::IncompatibleType {
-                    got: got.to_string(),
-                    require: require.to_string(),
+                    got: got.node.dupe(),
+                    require: require.dupe(),
                 },
             ))
         } else {
@@ -278,7 +325,7 @@ impl<'a> TypingOracleCtx<'a> {
                 .mk_error_as_maybe_internal(
                     span,
                     TypingOracleCtxError::CallToNonCallable {
-                        ty: fun.to_string(),
+                        ty: Ty::basic(fun.dupe()),
                     },
                 )),
             TyBasic::Iter(_) | TyBasic::Type => {
