@@ -560,7 +560,7 @@ for _i in []:
     assert!(errors.is_empty(), "{errors:?}");
 
     let mut out = String::new();
-    for (owner, name, kind, ty) in typemap.bindings() {
+    for (owner, name, kind, ty, _) in typemap.bindings() {
         writeln!(out, "{}: {name} {} {ty}", owner.join("."), kind.as_str()).unwrap();
     }
     writeln!(out, "--").unwrap();
@@ -590,4 +590,84 @@ for _i in []:
     assert_eq!(ids.len(), 2);
     assert!(ids[0].is_some());
     assert_eq!(ids[0], ids[1]);
+}
+
+/// I3: why a declaration is typed as `Any` is reported on the binding it was
+/// recorded for, never on another binding of the same name: a parameter
+/// shadowing an approximated module name has none, and two defs' locals of
+/// one name each have their own.
+#[test]
+fn approximations_reported_per_binding() {
+    let ast = AstModule::parse(
+        "filename",
+        r#"
+if len([]) > 0:
+    R = record(a = str)
+Twice = record(a = str)
+Twice = record(a = int)
+Ok = record(a = str)
+
+def f(R: int):
+    L = record(a = str)
+    return L
+
+def g():
+    L = enum("a")
+    M = 1
+    return L
+"#
+        .to_owned(),
+        &Dialect::AllOptionsInternal,
+    )
+    .unwrap();
+    let (_, typemap, _, approximations) =
+        ast.typecheck(&super::typecheck_globals(), &HashMap::new());
+
+    let reason = |a: Option<crate::typing::DeclarationApproximation>| a.map(|a| a.as_str());
+    let mut out = String::new();
+    for (owner, name, kind, _, approximation) in typemap.bindings() {
+        writeln!(
+            out,
+            "{}: {name} {} {:?}",
+            owner.join("."),
+            kind.as_str(),
+            reason(approximation)
+        )
+        .unwrap();
+    }
+    writeln!(out, "--").unwrap();
+    for b in typemap.module_bindings() {
+        writeln!(out, "{}: {:?}", b.name, reason(b.approximation)).unwrap();
+    }
+    assert_eq!(
+        out,
+        "\
+f: L local Some(\"in_def\")
+f: R param None
+g: L local Some(\"in_def\")
+g: M local None
+--
+Ok: None
+R: Some(\"conditional_binding\")
+Twice: Some(\"rebound\")
+f: None
+g: None
+"
+    );
+
+    // The text report is unchanged: one entry per approximated binding.
+    let reported: Vec<String> = approximations
+        .iter()
+        .filter(|a| a.category == "Declaration typed as Any")
+        .map(|a| a.message.clone())
+        .collect();
+    assert_eq!(
+        reported,
+        [
+            "\"R: conditional_binding\"",
+            "\"Twice: rebound\"",
+            "\"L: in_def\"",
+            "\"L: in_def\""
+        ]
+    );
 }

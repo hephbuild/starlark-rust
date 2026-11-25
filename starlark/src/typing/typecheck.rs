@@ -63,6 +63,7 @@ use crate::typing::bindings::InferReturn;
 use crate::typing::ctx::TypingContext;
 use crate::typing::error::InternalError;
 use crate::typing::error::TypingError;
+use crate::typing::fill_types_for_lint::DeclarationApproximation;
 use crate::typing::fill_types_for_lint::ModuleVarTypes;
 use crate::typing::fill_types_for_lint::fill_types_for_lint_typechecker;
 use crate::typing::interface::Interface;
@@ -458,6 +459,7 @@ struct DefBinding {
     kind: BindingKind,
     span: Span,
     ty: Ty,
+    approximation: Option<DeclarationApproximation>,
 }
 
 /// A module-level name, as [`TypeMap::module_bindings`] reports it.
@@ -473,6 +475,10 @@ pub struct ModuleBinding<'a> {
     /// For a record or enum type this module declares: the type's id (the
     /// one its instances' type carries), and the binding that named it.
     pub declaration: Option<(TypeInstanceId, FileSpan)>,
+    /// Why a `record(...)` or `enum(...)` bound to this name is typed as
+    /// `Any`, when it is. Recorded for this binding only: a def's parameter
+    /// or local of the same name has its own (see [`TypeMap::bindings`]).
+    pub approximation: Option<DeclarationApproximation>,
 }
 
 #[derive(Debug)]
@@ -481,6 +487,7 @@ struct ModuleBindingData {
     ty: Ty,
     as_type: Option<Ty>,
     declaration: Option<(TypeInstanceId, Span)>,
+    approximation: Option<DeclarationApproximation>,
 }
 
 /// Structure containing all the inferred types.
@@ -531,10 +538,30 @@ impl TypeMap {
     /// bound more than once under one owner (a local and a comprehension
     /// variable, or two module-scope defs of one name, one in each branch of
     /// an `if`).
-    pub fn bindings(&self) -> impl Iterator<Item = (&[String], &str, BindingKind, &Ty)> {
-        self.def_bindings
-            .iter()
-            .map(|b| (b.owner.as_slice(), b.name.as_str(), b.kind, &b.ty))
+    ///
+    /// The last element is why a `record(...)` or `enum(...)` this binding
+    /// holds is typed as `Any` (always [`DeclarationApproximation::InDef`]
+    /// today), recorded for this binding only.
+    pub fn bindings(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            &[String],
+            &str,
+            BindingKind,
+            &Ty,
+            Option<DeclarationApproximation>,
+        ),
+    > {
+        self.def_bindings.iter().map(|b| {
+            (
+                b.owner.as_slice(),
+                b.name.as_str(),
+                b.kind,
+                &b.ty,
+                b.approximation,
+            )
+        })
     }
 
     /// Each module-level name, private and loaded names included, sorted by
@@ -544,6 +571,7 @@ impl TypeMap {
             name: &b.name,
             ty: &b.ty,
             as_type: b.as_type.as_ref(),
+            approximation: b.approximation,
             declaration: b.declaration.map(|(id, span)| {
                 (
                     id,
@@ -740,6 +768,10 @@ impl AstModuleTypecheck for AstModule {
                     kind,
                     span,
                     ty,
+                    approximation: module_var_types
+                        .declaration_approximations
+                        .get(&id)
+                        .copied(),
                 }
             })
             .collect();
@@ -752,10 +784,33 @@ impl AstModuleTypecheck for AstModule {
             ))
         });
 
+        // A module name has one binding, so its reason is the one recorded
+        // for that binding; a def's binding of the same name has its own.
+        let mut module_approximations = UnorderedMap::new();
+        for (id, approximation) in module_var_types
+            .declaration_approximations
+            .entries_unordered()
+        {
+            match scope_data.get_binding(*id).resolved_slot(&codemap) {
+                Ok(Slot::Module(slot)) => {
+                    module_approximations.insert(slot, *approximation);
+                }
+                Ok(Slot::Local(_)) => {}
+                Err(e) => {
+                    return (
+                        vec![InternalError::into_error(e)],
+                        TypeMap::empty(codemap),
+                        Interface::default(),
+                        Vec::new(),
+                    );
+                }
+            }
+        }
         let mut module_bindings: Vec<ModuleBindingData> = names
             .all_names_slots_and_visibilities()
             .into_iter()
             .map(|(name, slot, _)| ModuleBindingData {
+                approximation: module_approximations.get(&slot).copied(),
                 name: name.as_str().to_owned(),
                 ty: module_var_types
                     .types

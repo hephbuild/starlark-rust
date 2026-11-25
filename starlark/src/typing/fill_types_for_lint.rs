@@ -86,7 +86,7 @@ use crate::values::typing::type_compiled::compiled::TypeCompiled;
 /// Why the pre-pass types a `record(...)` or `enum(...)` declaration as
 /// `Any` instead of the type evaluation gives it.
 #[derive(Debug, Clone, Copy, Dupe, PartialEq, Eq, Hash)]
-pub(crate) enum DeclarationApproximation {
+pub enum DeclarationApproximation {
     /// Declared under `if` or `for` at the top level.
     ConditionalBinding,
     /// The name is bound more than once at the top level.
@@ -104,7 +104,7 @@ pub(crate) enum DeclarationApproximation {
 
 impl DeclarationApproximation {
     /// The reason as a stable identifier.
-    pub(crate) fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             DeclarationApproximation::ConditionalBinding => "conditional_binding",
             DeclarationApproximation::Rebound => "rebound",

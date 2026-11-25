@@ -56,6 +56,7 @@ pub use basic::TyBasic;
 pub use callable::TyCallable;
 pub use callable_param::ParamIsRequired;
 pub use callable_param::ParamSpec;
+pub use fill_types_for_lint::DeclarationApproximation;
 pub use function::TyFunction;
 pub use interface::Interface;
 pub use members::members;
