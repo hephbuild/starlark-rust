@@ -101,6 +101,15 @@ pub trait TyCustomImpl:
     }
     /// Type of `self.attr`.
     fn attribute(&self, attr: &str) -> Result<Ty, TypingNoContextError>;
+    /// Every name [`attribute`](TyCustomImpl::attribute) accepts, or `None`
+    /// if the type is open (it accepts names it cannot list).
+    ///
+    /// [`members`](crate::typing::members) types each name through
+    /// `attribute`, so a name listed here that `attribute` refuses is dropped,
+    /// but a name `attribute` accepts and this omits is a disagreement.
+    fn attribute_names(&self) -> Option<Vec<String>> {
+        None
+    }
     /// Merge `x | other` into a single custom type, or fail.
     fn union2(x: Arc<Self>, other: Arc<Self>) -> Result<Arc<Self>, (Arc<Self>, Arc<Self>)> {
         if x == other { Ok(x) } else { Err((x, other)) }
@@ -145,6 +154,7 @@ pub(crate) trait TyCustomDyn:
         ctx: &TypingOracleCtx,
     ) -> Result<Ty, TypingNoContextOrInternalError>;
     fn attribute_dyn(&self, attr: &str) -> Result<Ty, TypingNoContextError>;
+    fn attribute_names_dyn(&self) -> Option<Vec<String>>;
     fn bin_op_dyn(
         &self,
         bin_op: TypingBinOp,
@@ -215,6 +225,10 @@ impl<T: TyCustomImpl> TyCustomDyn for T {
 
     fn attribute_dyn(&self, attr: &str) -> Result<Ty, TypingNoContextError> {
         self.attribute(attr)
+    }
+
+    fn attribute_names_dyn(&self) -> Option<Vec<String>> {
+        self.attribute_names()
     }
 
     fn iter_item_dyn(&self) -> Result<Ty, TypingNoContextError> {

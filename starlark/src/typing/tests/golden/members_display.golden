@@ -1,0 +1,52 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Lib:
+  name: str
+  port: int
+  srcs: list[str]
+record[Lib]:
+  type: str
+Pkg:
+  libs: list[Lib]
+  main: Lib
+enum[Mode]:
+  debug: Mode
+  my-mode: Mode
+  release: Mode
+  type: typing.Any
+  values: def() -> list
+Mode:
+  index: int
+  value: typing.Any
+Lib | None:
+  name: str
+  port: int
+  srcs: list[str]
+Lib | Mode:
+  index: int
+  name: str
+  port: int
+  srcs: list[str]
+  value: typing.Any
+list[str]:
+  append: def(_: typing.Any, /) -> None
+  clear: def() -> None
+  extend: def(_: typing.Iterable, /) -> None
+  index: def(_: str, _: int = ..., /) -> int
+  insert: def(_: int, _: typing.Any, /) -> None
+  pop: def(_: int = ..., /) -> str
+  remove: def(_: str, /) -> None
+typed_kwargs:
+  clear: def() -> None
+  get: def(_: str, /) -> None | str | def(_: str, _: typing.Any, /) -> typing.Any
+  items: def() -> list[(str, str)]
+  keys: def() -> list[str]
+  pop: def(_: typing.Any, /, default: typing.Any = ...) -> typing.Any
+  popitem: def() -> (str, str)
+  setdefault: def(_: typing.Any, _: typing.Any = ..., /) -> typing.Any
+  update: def(_: typing.Iterable[(typing.Any, typing.Any)] | dict = ..., /, **kwargs: typing.Any) -> None
+  values: def() -> list[str]

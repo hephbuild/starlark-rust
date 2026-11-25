@@ -183,6 +183,10 @@ impl TyCustomImpl for TyTypedKwargs {
         )
     }
 
+    fn attribute_names(&self) -> Option<Vec<String>> {
+        TypingOracleCtx::dict_attr_names()
+    }
+
     fn intersects_with(&self, other: &TyBasic) -> bool {
         matches!(other, TyBasic::Dict(..)) || other.as_name() == Some("dict")
     }

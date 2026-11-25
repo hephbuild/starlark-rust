@@ -233,6 +233,15 @@ impl TyCustomImpl for TyUser {
         }
     }
 
+    fn attribute_names(&self) -> Option<Vec<String>> {
+        if self.fields.unknown {
+            return None;
+        }
+        let mut names = self.base.method_names();
+        names.extend(self.fields.known.keys().cloned());
+        Some(names)
+    }
+
     fn index(
         &self,
         item: &TyBasic,

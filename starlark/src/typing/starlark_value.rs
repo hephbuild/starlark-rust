@@ -457,6 +457,30 @@ impl TyStarlarkValue {
         Err(TypingNoContextError)
     }
 
+    /// Names of the methods and attributes in `methods`, the ones
+    /// [`attr_from_methods`](Self::attr_from_methods) accepts.
+    pub(crate) fn method_names(self) -> Vec<String> {
+        match (self.vtable.vtable.get_methods)() {
+            Some(methods) => methods.names(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Every name [`attr`](Self::attr) accepts, or `None` if it accepts names
+    /// it cannot list.
+    ///
+    /// Past `methods`, `attr` asks `attr_ty`, which is `None` for every name
+    /// unless the value implements `get_attr`, and then `Any` for every name
+    /// (both written by `#[starlark_value]`). A name that is never an
+    /// identifier tells the two apart. A hand-written `attr_ty` that answers
+    /// only some names would be missed; none exists in this crate.
+    pub(crate) fn attr_names(self) -> Option<Vec<String>> {
+        if (self.vtable.vtable.attr_ty)("").is_some() {
+            return None;
+        }
+        Some(self.method_names())
+    }
+
     pub(crate) fn attr(self, name: &str) -> Result<Ty, TypingNoContextError> {
         if let Ok(ty) = self.attr_from_methods(name) {
             return Ok(ty);

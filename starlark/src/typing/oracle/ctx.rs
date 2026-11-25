@@ -495,7 +495,42 @@ impl<'a> TypingOracleCtx<'a> {
         }
     }
 
-    fn expr_dot_basic(&self, array: &TyBasic, attr: &str) -> Result<Ty, TypingNoContextError> {
+    /// Every name [`dict_attr`](Self::dict_attr) accepts, or `None` if it is
+    /// open.
+    pub(crate) fn dict_attr_names() -> Option<Vec<String>> {
+        let mut names = TyStarlarkValue::new::<MutableDict>().attr_names()?;
+        names.extend(
+            ["get", "keys", "values", "items", "popitem"]
+                .iter()
+                .map(|s| (*s).to_owned()),
+        );
+        Some(names)
+    }
+
+    /// Every name [`expr_dot_basic`](Self::expr_dot_basic) accepts on
+    /// `array`, or `None` if it accepts names it cannot list (an open type).
+    /// Kept next to `expr_dot_basic`, whose special cases it mirrors; a name
+    /// listed here that `expr_dot_basic` refuses is dropped by
+    /// [`members`](crate::typing::members).
+    pub(crate) fn expr_dot_names(array: &TyBasic) -> Option<Vec<String>> {
+        match array {
+            TyBasic::Any | TyBasic::Callable(_) | TyBasic::Iter(_) | TyBasic::Type => None,
+            TyBasic::StarlarkValue(s) => s.attr_names(),
+            TyBasic::Tuple(_) => Some(Vec::new()),
+            TyBasic::List(_) => {
+                let mut names = TyStarlarkValue::new::<List>().attr_names()?;
+                names.extend(["pop", "index", "remove"].iter().map(|s| (*s).to_owned()));
+                Some(names)
+            }
+            TyBasic::Dict(..) => Self::dict_attr_names(),
+            TyBasic::Custom(custom) => custom.0.attribute_names_dyn(),
+            TyBasic::Set(_) => TyStarlarkValue::new::<MutableSet>().attr_names(),
+        }
+    }
+
+    /// Type of `array.attr` for one alternative of a union: what
+    /// [`expr_dot`](Self::expr_dot) asks of each.
+    pub(crate) fn expr_dot_basic(array: &TyBasic, attr: &str) -> Result<Ty, TypingNoContextError> {
         match array {
             TyBasic::Any | TyBasic::Callable(_) | TyBasic::Iter(_) | TyBasic::Type => Ok(Ty::any()),
             TyBasic::StarlarkValue(s) => s.attr(attr),
@@ -523,7 +558,7 @@ impl<'a> TypingOracleCtx<'a> {
     }
 
     pub(crate) fn expr_dot(&self, span: Span, array: &Ty, attr: &str) -> Result<Ty, TypingError> {
-        match array.typecheck_union_simple(|basic| self.expr_dot_basic(basic, attr)) {
+        match array.typecheck_union_simple(|basic| Self::expr_dot_basic(basic, attr)) {
             Ok(x) => Ok(x),
             Err(TypingNoContextError) => Err(self.mk_error(
                 span,
