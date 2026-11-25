@@ -25,6 +25,7 @@ use crate::collections::SmallMap;
 use crate::environment::GlobalsBuilder;
 use crate::eval::Evaluator;
 use crate::values::Value;
+use crate::values::function::SpecialBuiltinFunction;
 use crate::values::record::field::Field;
 use crate::values::record::record_type::RecordType;
 use crate::values::typing::type_compiled::compiled::TypeCompiled;
@@ -58,6 +59,7 @@ pub(crate) fn register_record(builder: &mut GlobalsBuilder) {
     /// Now the `port` field can be omitted, defaulting to `80` is not present (for example, `MyRecord(host="localhost").port == 80`).
     ///
     /// Records are stored deduplicating their field names, making them more memory efficient than dictionaries.
+    #[starlark(special_builtin_function = SpecialBuiltinFunction::Record)]
     fn record<'v>(
         #[starlark(kwargs)] kwargs: SmallMap<String, Value<'v>>,
         eval: &mut Evaluator<'v, '_, '_>,
@@ -84,6 +86,7 @@ pub(crate) fn register_record(builder: &mut GlobalsBuilder) {
     /// rec.mask == 255
     /// # "#);
     /// ```
+    #[starlark(special_builtin_function = SpecialBuiltinFunction::Field)]
     fn field<'v>(
         #[starlark(require = pos)] typ: Value<'v>,
         default: Option<Value<'v>>,

@@ -24,6 +24,7 @@ use crate::values::Heap;
 use crate::values::StringValue;
 use crate::values::Value;
 use crate::values::enumeration::EnumType;
+use crate::values::function::SpecialBuiltinFunction;
 use crate::values::tuple::UnpackTuple;
 
 #[starlark_module]
@@ -47,6 +48,7 @@ pub fn register_enum(builder: &mut GlobalsBuilder) {
     /// * Treat `MyEnum` a bit like an array, with `len(MyEnum) == 3`, `MyEnum[1] == MyEnum("option2")` and iteration over enums `[x.value for x in MyEnum] == ["option1", "option2", "option3"]`.
     ///
     /// Enumeration types store each value once, which are then efficiently referenced by enumeration values.
+    #[starlark(special_builtin_function = SpecialBuiltinFunction::Enum)]
     fn r#enum<'v>(
         #[starlark(args)] args: UnpackTuple<StringValue<'v>>,
         heap: Heap<'v>,
