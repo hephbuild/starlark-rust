@@ -1,0 +1,50 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+Twice = record(a = str)
+Twice = record(a = int)
+if len([]) > 0:
+    Cond = record(a = str)
+Mode = enum("a", "a")
+Star = record(**{"a": str})
+NonLit = enum("a" + "b")
+
+def f(t: Twice, c: Cond, m: Mode, s: Star, n: NonLit):
+    Local = record(a = str)
+    t.nope
+    c.nope
+    m.nope
+    s.nope
+    n.nope
+
+No errors.
+
+Approximations:
+Approximation: Unknown type = "Span { begin: Pos(177), end: Pos(182) }"
+Approximation: Unknown type = "Span { begin: Pos(187), end: Pos(191) }"
+Approximation: Unknown type = "Span { begin: Pos(196), end: Pos(200) }"
+Approximation: Unknown type = "Span { begin: Pos(205), end: Pos(209) }"
+Approximation: Unknown type = "Span { begin: Pos(214), end: Pos(220) }"
+Approximation: Declaration typed as Any = "\"Twice: rebound\""
+Approximation: Declaration typed as Any = "\"Cond: conditional_binding\""
+Approximation: Declaration typed as Any = "\"Mode: invalid_declaration\""
+Approximation: Declaration typed as Any = "\"Star: star_args\""
+Approximation: Declaration typed as Any = "\"NonLit: non_literal_variant\""
+Approximation: Declaration typed as Any = "\"Local: in_def\""
+
+Compiler typechecker (eval):
+Compiler typechecker and eval results mismatch.
+
+Traceback (most recent call last):
+  * filename:6, in <module>
+      Mode = enum("a", "a")
+error: enum values must all be distinct, but repeated `"a"`
+ --> filename:6:8
+  |
+6 | Mode = enum("a", "a")
+  |        ^^^^^^^^^^^^^^
+  |

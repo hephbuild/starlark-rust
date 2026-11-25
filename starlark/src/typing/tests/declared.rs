@@ -178,3 +178,57 @@ fn export_as_unchanged() {
 
     assert_eq!(evaluated, built);
 }
+
+#[test]
+fn declared_record_and_enum_checked() {
+    crate::typing::tests::TypeCheck::new().check(
+        "declared_record_and_enum_checked",
+        r#"
+F = field(str)
+Lib = record(name = str, port = field(int, 80), srcs = field(list[str], []), alias = F)
+Mode = enum("debug", "release")
+Libs = list[Lib]
+Opt = Lib | None
+
+def ok(l: Lib, m: Mode, ls: Libs, o: Opt) -> str:
+    l.srcs.append("x")
+    return l.name + m.value + ls[0].name
+
+def bad_field(l: Lib):
+    l.nme
+
+def bad_arg():
+    Lib(name = 1, alias = "a")
+
+def bad_enum(m: Mode):
+    pass
+
+def call_bad_enum():
+    bad_enum("debug")
+"#,
+    );
+}
+
+#[test]
+fn declarations_approximated_as_any() {
+    crate::typing::tests::TypeCheck::new().check(
+        "declarations_approximated_as_any",
+        r#"
+Twice = record(a = str)
+Twice = record(a = int)
+if len([]) > 0:
+    Cond = record(a = str)
+Mode = enum("a", "a")
+Star = record(**{"a": str})
+NonLit = enum("a" + "b")
+
+def f(t: Twice, c: Cond, m: Mode, s: Star, n: NonLit):
+    Local = record(a = str)
+    t.nope
+    c.nope
+    m.nope
+    s.nope
+    n.nope
+"#,
+    );
+}

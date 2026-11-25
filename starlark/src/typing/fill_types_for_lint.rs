@@ -18,9 +18,12 @@
 use std::fmt::Display;
 use std::iter;
 
+use dupe::Dupe;
+use starlark_map::small_map::SmallMap;
 use starlark_map::unordered_map;
 use starlark_map::unordered_map::UnorderedMap;
 use starlark_syntax::slice_vec_ext::SliceExt;
+use starlark_syntax::syntax::ast::ArgumentP;
 use starlark_syntax::syntax::ast::AssignP;
 use starlark_syntax::syntax::ast::AssignTargetP;
 use starlark_syntax::syntax::ast::AstLiteral;
@@ -43,6 +46,7 @@ use crate::codemap::Span;
 use crate::codemap::Spanned;
 use crate::environment::slots::ModuleSlotId;
 use crate::eval::compiler::constants::Constants;
+use crate::eval::compiler::scope::BindingId;
 use crate::eval::compiler::scope::ModuleScopeData;
 use crate::eval::compiler::scope::ResolvedIdent;
 use crate::eval::compiler::scope::Slot;
@@ -64,9 +68,49 @@ use crate::typing::error::TypingError;
 use crate::util::arc_str::ArcStr;
 use crate::values::Heap;
 use crate::values::Value;
+use crate::values::ValueLike;
+use crate::values::enumeration::EnumType;
+use crate::values::function::NativeFunction;
+use crate::values::function::SpecialBuiltinFunction;
+use crate::values::record::field::Field;
+use crate::values::record::field::FieldGen;
+use crate::values::record::record_type::RecordType;
 use crate::values::tuple::AllocTuple;
 use crate::values::types::ellipsis::Ellipsis;
 use crate::values::typing::type_compiled::compiled::TypeCompiled;
+
+/// Why the pre-pass types a `record(...)` or `enum(...)` declaration as
+/// `Any` instead of the type evaluation gives it.
+#[derive(Debug, Clone, Copy, Dupe, PartialEq, Eq, Hash)]
+pub(crate) enum DeclarationApproximation {
+    /// Declared under `if` or `for` at the top level.
+    ConditionalBinding,
+    /// The name is bound more than once at the top level.
+    Rebound,
+    /// An `enum(...)` variant is not a string literal.
+    NonLiteralVariant,
+    /// The call has `*args` or `**kwargs`.
+    StarArgs,
+    /// Declared inside a `def`.
+    InDef,
+    /// The call is one evaluation rejects (positional arguments to `record`,
+    /// a duplicate variant, no fields or no variants).
+    InvalidDeclaration,
+}
+
+impl DeclarationApproximation {
+    /// The reason as a stable identifier.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            DeclarationApproximation::ConditionalBinding => "conditional_binding",
+            DeclarationApproximation::Rebound => "rebound",
+            DeclarationApproximation::NonLiteralVariant => "non_literal_variant",
+            DeclarationApproximation::StarArgs => "star_args",
+            DeclarationApproximation::InDef => "in_def",
+            DeclarationApproximation::InvalidDeclaration => "invalid_declaration",
+        }
+    }
+}
 
 /// Value computed during partial evaluation of globals.
 #[derive(Clone)]
@@ -74,6 +118,12 @@ struct GlobalValue<'v> {
     /// `None` means we don't know (or know it may have different value depending on condition).
     value: Option<Value<'v>>,
     ty: Ty,
+    /// The type this name denotes in a type annotation, when it has no
+    /// `value`. Set only for a loaded name that is a type in the module that
+    /// declares it (a record, an enum or an alias), from its interface.
+    as_type: Option<Ty>,
+    /// Set when this is a record or enum declaration typed as `Any`.
+    approximation: Option<DeclarationApproximation>,
 }
 
 impl<'v> GlobalValue<'v> {
@@ -88,10 +138,25 @@ impl<'v> GlobalValue<'v> {
         // So here we say that we don't know what is the value.
         // We could check if both values are equal, use that equal value,
         // but values referenced by the types should not be defined conditionally.
+        let approximation = if a.is_declaration() || b.is_declaration() {
+            Some(DeclarationApproximation::Rebound)
+        } else {
+            None
+        };
         GlobalValue {
             value: None,
             ty: Ty::union2(a.ty, b.ty),
+            as_type: None,
+            approximation,
         }
+    }
+
+    /// A record or enum type, or a declaration of one typed as `Any`.
+    fn is_declaration(&self) -> bool {
+        self.approximation.is_some()
+            || self.value.is_some_and(|v| {
+                v.downcast_ref::<RecordType>().is_some() || v.downcast_ref::<EnumType>().is_some()
+            })
     }
 }
 
@@ -100,18 +165,55 @@ impl<'v> GlobalValue<'v> {
         GlobalValue {
             value: Some(value),
             ty: Ty::of_value(value),
+            as_type: None,
+            approximation: None,
         }
     }
 
     fn any() -> GlobalValue<'v> {
-        GlobalValue {
-            value: None,
-            ty: Ty::any(),
-        }
+        GlobalValue::ty(Ty::any())
     }
 
     fn ty(ty: Ty) -> GlobalValue<'v> {
-        GlobalValue { value: None, ty }
+        GlobalValue {
+            value: None,
+            ty,
+            as_type: None,
+            approximation: None,
+        }
+    }
+
+    fn approximated(approximation: DeclarationApproximation) -> GlobalValue<'v> {
+        GlobalValue {
+            approximation: Some(approximation),
+            ..GlobalValue::any()
+        }
+    }
+
+    /// The value to use where a type is expected: the value, or the type a
+    /// loaded name denotes.
+    fn type_operand(&self, heap: Heap<'v>) -> Option<Value<'v>> {
+        match (self.value, &self.as_type) {
+            (Some(value), _) => Some(value),
+            (None, Some(ty)) => Some(TypeCompiled::from_ty(ty, heap).to_inner()),
+            (None, None) => None,
+        }
+    }
+}
+
+/// `record`, `field` or `enum` as starlark defines them: the native, found by
+/// its mark, never by its name.
+fn declaration_native(value: Value) -> Option<SpecialBuiltinFunction> {
+    match value
+        .downcast_ref::<NativeFunction>()?
+        .special_builtin_function
+    {
+        Some(
+            mark @ (SpecialBuiltinFunction::Record
+            | SpecialBuiltinFunction::Field
+            | SpecialBuiltinFunction::Enum),
+        ) => Some(mark),
+        _ => None,
     }
 }
 
@@ -119,6 +221,8 @@ struct GlobalTypesBuilder<'a, 'v> {
     approximations: &'a mut Vec<Approximation>,
     heap: Heap<'v>,
     values: UnorderedMap<ModuleSlotId, GlobalValue<'v>>,
+    /// Each binding of a record or enum declaration typed as `Any`, and why.
+    declaration_approximations: UnorderedMap<BindingId, DeclarationApproximation>,
     errors: Vec<TypingError>,
     module_scope_data: &'a ModuleScopeData<'a>,
     ctx: TypingOracleCtx<'a>,
@@ -137,11 +241,259 @@ impl<'a, 'v> GlobalTypesBuilder<'a, 'v> {
 
     fn call(
         &mut self,
-        _f: &CstExpr,
-        _args: &CallArgsP<CstPayload>,
+        f: &CstExpr,
+        args: &CallArgsP<CstPayload>,
     ) -> Result<GlobalValue<'v>, InternalError> {
-        // TODO(nga): could be a call like `record(...)`, and we need to evaluate it.
-        Ok(GlobalValue::any())
+        let callee = self.expr(f)?;
+        match callee.value.and_then(declaration_native) {
+            Some(SpecialBuiltinFunction::Record) => self.record(args),
+            Some(SpecialBuiltinFunction::Field) => self.field(args),
+            Some(SpecialBuiltinFunction::Enum) => self.enumeration(args),
+            _ => Ok(GlobalValue::any()),
+        }
+    }
+
+    /// The field a `record(...)` argument declares, from the argument's value
+    /// or the type a loaded name denotes, never from its `ty`: a value that
+    /// is only typed (`a = make()`) is unknown.
+    fn record_field(&self, arg: &GlobalValue<'v>) -> FieldGen<Value<'v>> {
+        let typ = match arg.type_operand(self.heap) {
+            Some(value) => {
+                if let Some(field) = Field::from_value(value) {
+                    return field.dupe();
+                }
+                // Not a type: evaluation rejects it, so lint asks nothing of it.
+                match TypeCompiled::new(value, self.heap) {
+                    Ok(typ) => typ,
+                    Err(_) => return self.optional_any_field(),
+                }
+            }
+            None => return self.optional_any_field(),
+        };
+        FieldGen::new(typ, None)
+    }
+
+    /// A field lint knows nothing of: any type, and never required.
+    fn optional_any_field(&self) -> FieldGen<Value<'v>> {
+        FieldGen::new(
+            TypeCompiled::from_ty(&Ty::any(), self.heap),
+            Some(Value::new_none()),
+        )
+    }
+
+    /// `record(name = type_or_field, ...)`, built as the native builds it.
+    fn record(&mut self, args: &CallArgsP<CstPayload>) -> Result<GlobalValue<'v>, InternalError> {
+        let mut named = Vec::with_capacity(args.args.len());
+        for arg in &args.args {
+            match &arg.node {
+                ArgumentP::Named(name, value) => named.push((name, value)),
+                ArgumentP::Args(_) | ArgumentP::KwArgs(_) => {
+                    return Ok(GlobalValue::approximated(
+                        DeclarationApproximation::StarArgs,
+                    ));
+                }
+                ArgumentP::Positional(_) => {
+                    return Ok(GlobalValue::approximated(
+                        DeclarationApproximation::InvalidDeclaration,
+                    ));
+                }
+            }
+        }
+        if named.is_empty() {
+            return Ok(GlobalValue::approximated(
+                DeclarationApproximation::InvalidDeclaration,
+            ));
+        }
+        let mut fields = SmallMap::with_capacity(named.len());
+        for (name, value) in named {
+            let value = self.expr(value)?;
+            let field = self.record_field(&value);
+            if fields.insert(name.node.clone(), field).is_some() {
+                return Ok(GlobalValue::approximated(
+                    DeclarationApproximation::InvalidDeclaration,
+                ));
+            }
+        }
+        Ok(GlobalValue::value(self.heap.alloc(RecordType::new(fields))))
+    }
+
+    /// `field(type, default = ...)`, built as the native builds it. An
+    /// unknown type is `Any`. A default lint cannot tell anything about makes
+    /// the field optional `Any`: lint never requires what evaluation does not.
+    fn field(&mut self, args: &CallArgsP<CstPayload>) -> Result<GlobalValue<'v>, InternalError> {
+        let mut typ = None;
+        let mut default = None;
+        for arg in &args.args {
+            match &arg.node {
+                ArgumentP::Positional(x) if typ.is_none() => typ = Some(x),
+                ArgumentP::Positional(x) if default.is_none() => default = Some(x),
+                ArgumentP::Named(name, x) if name.node == "default" && default.is_none() => {
+                    default = Some(x)
+                }
+                ArgumentP::Args(_) | ArgumentP::KwArgs(_) => return Ok(GlobalValue::any()),
+                ArgumentP::Positional(_) | ArgumentP::Named(..) => {
+                    return Ok(GlobalValue::any());
+                }
+            }
+        }
+        let Some(typ) = typ else {
+            return Ok(GlobalValue::any());
+        };
+        let typ = self.expr(typ)?;
+        let typ = match typ.type_operand(self.heap) {
+            Some(value) => match TypeCompiled::new(value, self.heap) {
+                Ok(typ) => typ,
+                Err(_) => TypeCompiled::from_ty(&Ty::any(), self.heap),
+            },
+            None => TypeCompiled::from_ty(&Ty::any(), self.heap),
+        };
+        let field = match default {
+            None => FieldGen::new(typ, None),
+            Some(default) => {
+                let known = Self::is_known_default(default);
+                match self.expr(default)?.value {
+                    Some(value) => FieldGen::new(typ, Some(value)),
+                    // Lint never reads a default's value, only its presence.
+                    None if known => FieldGen::new(typ, Some(Value::new_none())),
+                    None => self.optional_any_field(),
+                }
+            }
+        };
+        Ok(GlobalValue::value(self.heap.alloc(field)))
+    }
+
+    /// A default the pre-pass does not evaluate, but whose value is a literal
+    /// or a display, so the field's own type stands for it.
+    fn is_known_default(default: &CstExpr) -> bool {
+        match &default.node {
+            ExprP::Literal(_)
+            | ExprP::FString(_)
+            | ExprP::List(_)
+            | ExprP::Dict(_)
+            | ExprP::Tuple(_)
+            | ExprP::ListComprehension(..)
+            | ExprP::DictComprehension(..) => true,
+            ExprP::Minus(x) | ExprP::Plus(x) => Self::is_known_default(x),
+            _ => false,
+        }
+    }
+
+    /// `enum("a", "b", ...)`, built as the native builds it, when every
+    /// variant is a string literal.
+    fn enumeration(
+        &mut self,
+        args: &CallArgsP<CstPayload>,
+    ) -> Result<GlobalValue<'v>, InternalError> {
+        let mut variants = Vec::with_capacity(args.args.len());
+        let mut approximation = None;
+        for arg in &args.args {
+            match &arg.node {
+                ArgumentP::Positional(x) => match &x.node {
+                    ExprP::Literal(AstLiteral::String(s)) => {
+                        variants.push(self.heap.alloc_str(s.node.as_str()))
+                    }
+                    _ => {
+                        approximation.get_or_insert(DeclarationApproximation::NonLiteralVariant);
+                    }
+                },
+                ArgumentP::Args(_) | ArgumentP::KwArgs(_) => {
+                    return Ok(GlobalValue::approximated(
+                        DeclarationApproximation::StarArgs,
+                    ));
+                }
+                ArgumentP::Named(..) => {
+                    approximation = Some(DeclarationApproximation::InvalidDeclaration);
+                }
+            }
+        }
+        if let Some(approximation) = approximation {
+            return Ok(GlobalValue::approximated(approximation));
+        }
+        if variants.is_empty() {
+            return Ok(GlobalValue::approximated(
+                DeclarationApproximation::InvalidDeclaration,
+            ));
+        }
+        match EnumType::new(variants, self.heap) {
+            Ok(enum_type) => Ok(GlobalValue::value(enum_type.to_value())),
+            // A duplicate variant.
+            Err(_) => Ok(GlobalValue::approximated(
+                DeclarationApproximation::InvalidDeclaration,
+            )),
+        }
+    }
+
+    /// The declaration native `f` is, when it is an identifier bound to one.
+    /// Reads no local slot and records no error, so it is safe on code the
+    /// pre-pass does not evaluate (conditional code, def bodies).
+    fn callee_declaration_native(&self, f: &CstExpr) -> Option<SpecialBuiltinFunction> {
+        let ExprP::Identifier(ident) = &f.node else {
+            return None;
+        };
+        let value = match ident.payload.as_ref()? {
+            ResolvedIdent::Slot(Slot::Module(slot), _) => self.values.get(slot)?.value?,
+            ResolvedIdent::Slot(Slot::Local(_), _) => return None,
+            ResolvedIdent::Global(g) => g.to_value(),
+        };
+        declaration_native(value)
+    }
+
+    /// Whether `expr` declares a record or enum type.
+    fn is_type_declaration(&self, expr: &CstExpr) -> bool {
+        match &expr.node {
+            ExprP::Call(f, _) => matches!(
+                self.callee_declaration_native(f),
+                Some(SpecialBuiltinFunction::Record | SpecialBuiltinFunction::Enum)
+            ),
+            _ => false,
+        }
+    }
+
+    fn approximate_declaration(
+        &mut self,
+        ident: &CstAssignIdent,
+        approximation: DeclarationApproximation,
+    ) -> Result<(), InternalError> {
+        let binding_id = ident.resolved_binding_id(self.ctx.codemap)?;
+        self.declaration_approximations
+            .insert(binding_id, approximation);
+        Ok(())
+    }
+
+    /// Record each record or enum declared in a def body: the pre-pass does
+    /// not evaluate def bodies, so it is `Any` there.
+    fn def_declarations(&mut self, stmt: &CstStmt) -> Result<(), InternalError> {
+        match &stmt.node {
+            StmtP::Assign(AssignP { lhs, rhs, .. }) => {
+                if let AssignTargetP::Identifier(ident) = &lhs.node {
+                    if self.is_type_declaration(rhs) {
+                        self.approximate_declaration(ident, DeclarationApproximation::InDef)?;
+                    }
+                }
+                Ok(())
+            }
+            StmtP::Statements(xs) => {
+                for x in xs {
+                    self.def_declarations(x)?;
+                }
+                Ok(())
+            }
+            StmtP::If(_, body) => self.def_declarations(body),
+            StmtP::IfElse(_, then_else) => {
+                let (then_block, else_block) = &**then_else;
+                self.def_declarations(then_block)?;
+                self.def_declarations(else_block)
+            }
+            StmtP::For(ForP { body, .. }) => self.def_declarations(body),
+            StmtP::Def(def) => self.def_declarations(&def.body),
+            StmtP::Break
+            | StmtP::Continue
+            | StmtP::Pass
+            | StmtP::Return(_)
+            | StmtP::Expression(_)
+            | StmtP::AssignModify(..)
+            | StmtP::Load(_) => Ok(()),
+        }
     }
 
     fn expr_ident(&self, ident: &CstIdent) -> Result<GlobalValue<'v>, InternalError> {
@@ -203,8 +555,8 @@ impl<'a, 'v> GlobalTypesBuilder<'a, 'v> {
         index: &CstExpr,
     ) -> Result<GlobalValue<'v>, InternalError> {
         let array = self.expr(array)?;
-        let index = self.expr_spanned(index)?;
-        if let (Some(array), Some(index)) = (array.value, index.node.value) {
+        let index = self.expr(index)?;
+        if let (Some(array), Some(index)) = (array.value, index.type_operand(self.heap)) {
             match array.at(index, self.heap) {
                 Ok(value) => Ok(GlobalValue::value(value)),
                 Err(e) => Ok(self.err(span, e)),
@@ -224,8 +576,11 @@ impl<'a, 'v> GlobalTypesBuilder<'a, 'v> {
         let array = self.expr(array)?;
         let index0 = self.expr(index0)?;
         let index1 = self.expr(index1)?;
-        if let (Some(array), Some(index0), Some(index1)) = (array.value, index0.value, index1.value)
-        {
+        if let (Some(array), Some(index0), Some(index1)) = (
+            array.value,
+            index0.type_operand(self.heap),
+            index1.type_operand(self.heap),
+        ) {
             match array.get_ref().at2(index0, index1, self.heap) {
                 Ok(value) => Ok(GlobalValue::value(value)),
                 Err(e) => Ok(self.err(span, e)),
@@ -244,7 +599,9 @@ impl<'a, 'v> GlobalTypesBuilder<'a, 'v> {
     ) -> Result<GlobalValue<'v>, InternalError> {
         let lhs = self.expr(lhs)?;
         let rhs = self.expr(rhs)?;
-        if let (Some(lhs), BinOp::BitOr, Some(rhs)) = (lhs.value, op, rhs.value) {
+        if let (Some(lhs), BinOp::BitOr, Some(rhs)) =
+            (lhs.type_operand(self.heap), op, rhs.type_operand(self.heap))
+        {
             match lhs.bit_or(rhs, self.heap) {
                 Ok(value) => Ok(GlobalValue::value(value)),
                 Err(e) => Ok(self.err(span, e)),
@@ -316,28 +673,85 @@ impl<'a, 'v> GlobalTypesBuilder<'a, 'v> {
         }
     }
 
+    /// Name a record or enum type bound to `ident`, as `export_as` does at
+    /// evaluation, and type the binding with its now named type.
+    fn export(
+        &self,
+        ident: &CstAssignIdent,
+        value: GlobalValue<'v>,
+    ) -> Result<GlobalValue<'v>, InternalError> {
+        let Some(v) = value.value else {
+            return Ok(value);
+        };
+        let named = if let Some(record) = v.downcast_ref::<RecordType>() {
+            record.init_ty(&ident.ident)
+        } else if let Some(enum_type) = v.downcast_ref::<EnumType>() {
+            enum_type.init_ty(&ident.ident)
+        } else {
+            return Ok(value);
+        };
+        named.map_err(|e| InternalError::from_error(e, ident.span, self.ctx.codemap))?;
+        Ok(GlobalValue::value(v))
+    }
+
     fn assign_ident_value(
         &mut self,
         ident: &CstAssignIdent,
         value: GlobalValue<'v>,
     ) -> Result<(), InternalError> {
         let module_slot_id = self.resolve_assign_ident_to_module_slot_id(ident)?;
-        match self.values.entry(module_slot_id) {
+        let value = self.export(ident, value)?;
+        let value = match self.values.entry(module_slot_id) {
             unordered_map::Entry::Occupied(mut e) => {
                 let value = GlobalValue::union2(value, e.get().clone());
-                e.insert(value);
+                e.insert(value.clone());
+                value
             }
             unordered_map::Entry::Vacant(e) => {
-                e.insert(value);
+                e.insert(value.clone());
+                value
             }
+        };
+        if let Some(approximation) = value.approximation {
+            self.approximate_declaration(ident, approximation)?;
         }
         Ok(())
     }
 
     fn assign_unset_ident(&mut self, target: &CstAssignIdent) -> Result<(), InternalError> {
         let module_slot_id = self.resolve_assign_ident_to_module_slot_id(target)?;
-        self.values.insert(module_slot_id, GlobalValue::any());
+        let was_declaration = self
+            .values
+            .get(&module_slot_id)
+            .is_some_and(|v| v.is_declaration());
+        let value = if was_declaration {
+            self.approximate_declaration(target, DeclarationApproximation::ConditionalBinding)?;
+            GlobalValue::approximated(DeclarationApproximation::ConditionalBinding)
+        } else {
+            GlobalValue::any()
+        };
+        self.values.insert(module_slot_id, value);
         Ok(())
+    }
+
+    /// `target = rhs` where the pre-pass does not know whether it runs.
+    fn assign_unset_conditional(
+        &mut self,
+        target: &AssignTargetP<CstPayload>,
+        rhs: &CstExpr,
+    ) -> Result<(), InternalError> {
+        if let AssignTargetP::Identifier(ident) = target {
+            if self.is_type_declaration(rhs) {
+                let module_slot_id = self.resolve_assign_ident_to_module_slot_id(ident)?;
+                self.approximate_declaration(ident, DeclarationApproximation::ConditionalBinding)?;
+                self.values.insert(
+                    module_slot_id,
+                    GlobalValue::approximated(DeclarationApproximation::ConditionalBinding),
+                );
+                return Ok(());
+            }
+        }
+        self.assign_unset(target)
     }
 
     fn assign_value(
@@ -420,7 +834,7 @@ impl<'a, 'v> GlobalTypesBuilder<'a, 'v> {
             StmtP::Pass => Ok(()),
             StmtP::Return(_) => return Err(self.internal_error(stmt.span, "return")),
             StmtP::Expression(_) => Ok(()),
-            StmtP::Assign(AssignP { lhs, .. }) => self.assign_unset(lhs),
+            StmtP::Assign(AssignP { lhs, rhs, .. }) => self.assign_unset_conditional(lhs, rhs),
             StmtP::AssignModify(lhs, _, _) => self.assign_unset(lhs),
             StmtP::Statements(xs) => {
                 for x in xs {
@@ -436,7 +850,10 @@ impl<'a, 'v> GlobalTypesBuilder<'a, 'v> {
                 Ok(())
             }
             StmtP::For(for_stmt) => self.for_stmt_unset(for_stmt),
-            StmtP::Def(def) => self.assign_unset_ident(&def.name),
+            StmtP::Def(def) => {
+                self.def_declarations(&def.body)?;
+                self.assign_unset_ident(&def.name)
+            }
             StmtP::Load(_) => Err(self.internal_error(stmt.span, "load")),
         }
     }
@@ -482,6 +899,8 @@ impl<'a, 'v> GlobalTypesBuilder<'a, 'v> {
                 DefParamKind::Kwargs => kwargs = Some(ty),
             }
         }
+
+        self.def_declarations(&def.body)?;
 
         let result = self.get_ty_expr_opt(def.return_type.as_deref())?;
 
@@ -547,6 +966,17 @@ impl<'a, 'v> GlobalTypesBuilder<'a, 'v> {
 
     fn try_proper_ty(&mut self, path: &TypePathP<CstPayload>) -> Result<Option<Ty>, InternalError> {
         let TypePathP { first, rem } = path;
+        if rem.is_empty() {
+            // A loaded record, enum or alias.
+            if let GlobalValue {
+                value: None,
+                as_type: Some(ty),
+                ..
+            } = self.expr_ident(first)?
+            {
+                return Ok(Some(ty));
+            }
+        }
         let Some(value) = self.eval_path(path)? else {
             return Ok(None);
         };
@@ -772,6 +1202,9 @@ impl<'a, 'v> GlobalTypesBuilder<'a, 'v> {
 #[derive(Default)]
 pub(crate) struct ModuleVarTypes {
     pub(crate) types: UnorderedMap<ModuleSlotId, Ty>,
+    /// Each binding of a record or enum declaration the pre-pass types as
+    /// `Any`, top-level or in a def, and why.
+    pub(crate) declaration_approximations: UnorderedMap<BindingId, DeclarationApproximation>,
 }
 
 /// Populate `TypeExprP` type payload when running lint typechecker.
@@ -787,6 +1220,7 @@ pub(crate) fn fill_types_for_lint_typechecker(
             heap,
             ctx,
             values: UnorderedMap::new(),
+            declaration_approximations: UnorderedMap::new(),
             errors: Vec::new(),
             module_scope_data,
             approximations,
@@ -794,8 +1228,19 @@ pub(crate) fn fill_types_for_lint_typechecker(
         for stmt in module.iter_mut() {
             builder.top_level_stmt(stmt)?;
         }
-        let GlobalTypesBuilder { errors, values, .. } = builder;
+        let GlobalTypesBuilder {
+            errors,
+            values,
+            declaration_approximations,
+            ..
+        } = builder;
         let types = values.map_values(|v| v.ty);
-        Ok((errors, ModuleVarTypes { types }))
+        Ok((
+            errors,
+            ModuleVarTypes {
+                types,
+                declaration_approximations,
+            },
+        ))
     })
 }

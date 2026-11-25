@@ -1,0 +1,60 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+F = field(str)
+Lib = record(name = str, port = field(int, 80), srcs = field(list[str], []), alias = F)
+Mode = enum("debug", "release")
+Libs = list[Lib]
+Opt = Lib | None
+
+def ok(l: Lib, m: Mode, ls: Libs, o: Opt) -> str:
+    l.srcs.append("x")
+    return l.name + m.value + ls[0].name
+
+def bad_field(l: Lib):
+    l.nme
+
+def bad_arg():
+    Lib(name = 1, alias = "a")
+
+def bad_enum(m: Mode):
+    pass
+
+def call_bad_enum():
+    bad_enum("debug")
+
+Error:
+error: The attribute `nme` is not available on the type `Lib`
+  --> filename:13:7
+   |
+13 |     l.nme
+   |       ^^^
+   |
+
+Error:
+error: Expected type `str` but got `int`
+  --> filename:16:9
+   |
+16 |     Lib(name = 1, alias = "a")
+   |         ^^^^^^^^
+   |
+
+Error:
+error: Expected type `Mode` but got `str`
+  --> filename:22:14
+   |
+22 |     bad_enum("debug")
+   |              ^^^^^^^
+   |
+
+Compiler typechecker (eval):
+error: The attribute `nme` is not available on the type `Lib`
+  --> filename:13:7
+   |
+13 |     l.nme
+   |       ^^^
+   |

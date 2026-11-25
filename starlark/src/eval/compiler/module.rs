@@ -208,7 +208,10 @@ impl<'v> Compiler<'v, '_, '_, '_> {
             .into_iter()
             .map(|(module_slot_id, value)| (module_slot_id, Ty::of_value(value)))
             .collect();
-        ModuleVarTypes { types }
+        ModuleVarTypes {
+            types,
+            ..ModuleVarTypes::default()
+        }
     }
 
     pub(crate) fn eval_module(

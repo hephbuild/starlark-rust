@@ -489,6 +489,23 @@ impl AstModuleTypecheck for AstModule {
             .map(TypingError::into_error)
             .collect();
 
+        let mut declaration_approximations: Vec<_> = module_var_types
+            .declaration_approximations
+            .entries_unordered()
+            .map(|(id, approximation)| (*id, *approximation))
+            .collect();
+        declaration_approximations.sort_by_key(|(id, _)| *id);
+        for (id, approximation) in declaration_approximations {
+            approximations.push(Approximation::new(
+                "Declaration typed as Any",
+                format!(
+                    "{}: {}",
+                    scope_data.get_binding(id).name.as_str(),
+                    approximation.as_str()
+                ),
+            ));
+        }
+
         let mut res = HashMap::new();
         for (name, module_slot_id, vis) in names.all_names_slots_and_visibilities() {
             if vis == Visibility::Public {
