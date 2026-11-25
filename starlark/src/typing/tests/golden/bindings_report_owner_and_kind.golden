@@ -4,6 +4,8 @@
 # STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
 # ```
 
+c: p param typing.Any
+c: p param typing.Any
 f: args param tuple
 f: g local typing.Callable
 f: i local typing.Any
@@ -17,11 +19,16 @@ f: y local int
 f.inner: w local str
 f.inner: z param str
 h: x param str
+l: q param typing.Any
+l: r local typing.Any
 --
 Lib: record[Lib] as_type=Some("Lib") declared_line=Some(3)
 Lib2: record[Lib] as_type=Some("Lib") declared_line=Some(3)
 Mode: enum[Mode] as_type=Some("Mode") declared_line=Some(5)
 _Loaded: record[Lib] as_type=Some("Lib") declared_line=None
+_i: typing.Any as_type=None declared_line=None
 _private: typing.Any as_type=None declared_line=None
+c: typing.Any as_type=None declared_line=None
 f: def(x: int, *args: typing.Any, **kwargs: typing.Any) -> def(z: str) -> typing.Any as_type=None declared_line=None
 h: def(x: str) -> None as_type=None declared_line=None
+l: typing.Any as_type=None declared_line=None

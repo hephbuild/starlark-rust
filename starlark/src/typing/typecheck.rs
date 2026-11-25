@@ -329,7 +329,7 @@ impl BindingKind {
     }
 }
 
-/// The def path that owns each binding inside a top-level `def`, and how the
+/// The def path that owns each binding inside a module-scope `def`, and how the
 /// binding is made. A comprehension's or a lambda's binding is owned by the
 /// def it is in. The first way a binding is made wins (a parameter assigned
 /// in the body stays a parameter).
@@ -362,6 +362,29 @@ impl DefBindingOwners<'_> {
                 Ok(())
             }
             AssignTargetP::Index(_) | AssignTargetP::Dot(..) => Ok(()),
+        }
+    }
+
+    /// A module-scope statement: a `def` here, or under a top-level `if`,
+    /// `else` or `for`, owns its bindings under its own name (`["f"]`). Two
+    /// such defs of one name (`def f` in both branches of an `if`) both own
+    /// theirs under `["f"]`.
+    fn top_level(&mut self, stmt: &CstStmt) -> Result<(), InternalError> {
+        match &stmt.node {
+            StmtP::Def(def) => self.def(def),
+            StmtP::Statements(xs) => {
+                for x in xs {
+                    self.top_level(x)?;
+                }
+                Ok(())
+            }
+            StmtP::If(_, body) | StmtP::For(ForP { body, .. }) => self.top_level(body),
+            StmtP::IfElse(_, then_else) => {
+                let (then_block, else_block) = &**then_else;
+                self.top_level(then_block)?;
+                self.top_level(else_block)
+            }
+            _ => Ok(()),
         }
     }
 
@@ -427,7 +450,7 @@ impl DefBindingOwners<'_> {
     }
 }
 
-/// A binding inside a top-level `def`.
+/// A binding inside a module-scope `def`.
 #[derive(Debug)]
 struct DefBinding {
     owner: Vec<String>,
@@ -500,12 +523,14 @@ impl TypeMap {
         }
     }
 
-    /// Each binding inside a top-level `def`: the def path that owns it
-    /// (`["f"]`, or `["f", "g"]` for a def nested in `f`), its name, how it is
-    /// bound, and its type. A comprehension's or a lambda's binding is owned
-    /// by the def it is in. Sorted by owner, name and position; one name can
-    /// be bound more than once under one owner (a local and a comprehension
-    /// variable).
+    /// Each binding inside a module-scope `def` (at the top level, or under a
+    /// top-level `if`, `else` or `for`): the def path that owns it (`["f"]`,
+    /// or `["f", "g"]` for a def nested in `f`), its name, how it is bound,
+    /// and its type. A comprehension's or a lambda's binding is owned by the
+    /// def it is in. Sorted by owner, name and position; one name can be
+    /// bound more than once under one owner (a local and a comprehension
+    /// variable, or two module-scope defs of one name, one in each branch of
+    /// an `if`).
     pub fn bindings(&self) -> impl Iterator<Item = (&[String], &str, BindingKind, &Ty)> {
         self.def_bindings
             .iter()
@@ -685,15 +710,13 @@ impl AstModuleTypecheck for AstModule {
             owners: UnorderedMap::new(),
         };
         for top in cst.iter() {
-            if let StmtP::Def(def) = &top.node {
-                if let Err(e) = owners.def(def) {
-                    return (
-                        vec![InternalError::into_error(e)],
-                        TypeMap::empty(codemap),
-                        Interface::default(),
-                        Vec::new(),
-                    );
-                }
+            if let Err(e) = owners.top_level(top) {
+                return (
+                    vec![InternalError::into_error(e)],
+                    TypeMap::empty(codemap),
+                    Interface::default(),
+                    Vec::new(),
+                );
             }
         }
         let mut def_bindings: Vec<DefBinding> = owners

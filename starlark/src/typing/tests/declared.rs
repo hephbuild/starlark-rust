@@ -537,6 +537,18 @@ def f(x: int, *args, **kwargs):
 
 def h(x: str):
     pass
+
+if len([]) > 0:
+    def c(p: int):
+        pass
+else:
+    def c(p: str):
+        pass
+
+for _i in []:
+    if True:
+        def l(q: bool):
+            r = q
 "#
         .to_owned(),
         &Dialect::AllOptionsInternal,
