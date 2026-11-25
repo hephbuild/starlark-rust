@@ -29,7 +29,9 @@ use crate::environment::Module;
 use crate::eval::Evaluator;
 use crate::syntax::AstModule;
 use crate::syntax::Dialect;
+use crate::typing::AstModuleTypecheck;
 use crate::typing::Ty;
+use crate::typing::interface::Interface;
 use crate::values::Heap;
 use crate::values::Value;
 use crate::values::ValueLike;
@@ -229,6 +231,167 @@ def f(t: Twice, c: Cond, m: Mode, s: Star, n: NonLit):
     m.nope
     s.nope
     n.nope
+"#,
+    );
+}
+
+/// Typecheck `code` against `loads` without evaluating it; the errors as
+/// text and the interface.
+fn typecheck_only(code: &str, loads: &[(&str, &Interface)]) -> (Vec<String>, Interface) {
+    let ast = AstModule::parse("filename", code.to_owned(), &Dialect::AllOptionsInternal).unwrap();
+    let loads = loads
+        .iter()
+        .map(|(name, interface)| ((*name).to_owned(), (*interface).clone()))
+        .collect();
+    let (errors, _typemap, interface, _approximations) =
+        ast.typecheck(&super::typecheck_globals(), &loads);
+    (errors.iter().map(|e| format!("{e:#}")).collect(), interface)
+}
+
+/// `name: type` for each of `names`, as the interface has them.
+fn interface_types(interface: &Interface, names: &[&str]) -> String {
+    let mut out = String::new();
+    for name in names {
+        match interface.get(name) {
+            Some(ty) => writeln!(out, "{name}: {ty}").unwrap(),
+            None => writeln!(out, "{name}: <missing>").unwrap(),
+        }
+    }
+    out
+}
+
+/// A module-level call's result has the type the oracle gives a call of its
+/// callee, with every argument unknown: the call is never run, and its
+/// arguments are never checked.
+#[test]
+fn module_call_results_typed() {
+    let (errors, lib) = typecheck_only(
+        r#"
+def make():
+    return "s"
+"#,
+        &[],
+    );
+    assert_eq!(errors, Vec::<String>::new());
+
+    let (errors, interface) = typecheck_only(
+        r#"
+load("lib.star", "make")
+Lib = record(name = str)
+Mode = enum("debug", "release")
+
+def annotated() -> str:
+    return "a"
+
+def unannotated():
+    return 1
+
+def takes_str(s: str) -> int:
+    return len(s)
+
+def rebound() -> str:
+    return "r"
+
+early = later()
+
+def later() -> int:
+    return 1
+
+cfg = Lib(name = "x")
+bad_arg = Lib(name = 1)
+mode = Mode("debug")
+ann = annotated()
+unann = unannotated()
+loaded = make()
+both = annotated()
+both = later()
+if len([]) > 0:
+    cond = annotated()
+else:
+    cond = later()
+split = "a,b".split(",")
+star = annotated(*[], **{})
+wrong_arg = takes_str(1)
+rebound_call = rebound()
+rebound = 1
+never = fail("no")
+"#,
+        &[("lib.star", &lib)],
+    );
+    assert_eq!(errors, Vec::<String>::new());
+    assert_eq!(
+        interface_types(
+            &interface,
+            &[
+                "cfg",
+                "bad_arg",
+                "mode",
+                "ann",
+                "unann",
+                "loaded",
+                "both",
+                "cond",
+                "early",
+                "split",
+                "star",
+                "wrong_arg",
+                "rebound_call",
+                "never",
+            ]
+        ),
+        "\
+cfg: Lib
+bad_arg: Lib
+mode: Mode
+ann: str
+unann: typing.Any
+loaded: str
+both: int | str
+cond: typing.Any
+early: typing.Any
+split: list[str]
+star: str
+wrong_arg: int
+rebound_call: str
+never: typing.Never
+"
+    );
+}
+
+/// A call result has no value, so it is never a type.
+#[test]
+fn module_call_result_is_not_a_type() {
+    let (errors, _) = typecheck_only(
+        r#"
+Lib = record(name = str)
+cfg = Lib(name = "x")
+Made = list(["a"])
+
+def f(x: Made, y: cfg):
+    pass
+"#,
+        &[],
+    );
+    assert_eq!(errors, Vec::<String>::new());
+}
+
+#[test]
+fn module_call_result_attrs_checked() {
+    crate::typing::tests::TypeCheck::new().check(
+        "module_call_result_attrs_checked",
+        r#"
+Lib = record(name = str)
+cfg = Lib(name = "x")
+parts = "a,b".split(",")
+
+def ok() -> str:
+    return cfg.name + parts[0]
+
+def bad():
+    cfg.nme
+
+def bad_parts():
+    parts.nope
 "#,
     );
 }

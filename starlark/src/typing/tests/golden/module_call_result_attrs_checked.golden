@@ -1,0 +1,43 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+Lib = record(name = str)
+cfg = Lib(name = "x")
+parts = "a,b".split(",")
+
+def ok() -> str:
+    return cfg.name + parts[0]
+
+def bad():
+    cfg.nme
+
+def bad_parts():
+    parts.nope
+
+Error:
+error: The attribute `nme` is not available on the type `Lib`
+  --> filename:10:9
+   |
+10 |     cfg.nme
+   |         ^^^
+   |
+
+Error:
+error: The attribute `nope` is not available on the type `list[str]`
+  --> filename:13:11
+   |
+13 |     parts.nope
+   |           ^^^^
+   |
+
+Compiler typechecker (eval):
+error: The attribute `nme` is not available on the type `Lib`
+  --> filename:10:9
+   |
+10 |     cfg.nme
+   |         ^^^
+   |

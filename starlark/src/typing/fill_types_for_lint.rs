@@ -62,14 +62,17 @@ use crate::typing::ParamSpec;
 use crate::typing::Ty;
 use crate::typing::TypingOracleCtx;
 use crate::typing::bindings::literal_default_ty;
+use crate::typing::call_args::TyCallArgs;
 use crate::typing::callable_param::ParamIsRequired;
 use crate::typing::error::InternalError;
 use crate::typing::error::TypingError;
+use crate::typing::error::TypingOrInternalError;
 use crate::util::arc_str::ArcStr;
 use crate::values::Heap;
 use crate::values::Value;
 use crate::values::ValueLike;
 use crate::values::enumeration::EnumType;
+use crate::values::function::BoundMethod;
 use crate::values::function::NativeFunction;
 use crate::values::function::SpecialBuiltinFunction;
 use crate::values::record::field::Field;
@@ -241,6 +244,7 @@ impl<'a, 'v> GlobalTypesBuilder<'a, 'v> {
 
     fn call(
         &mut self,
+        span: Span,
         f: &CstExpr,
         args: &CallArgsP<CstPayload>,
     ) -> Result<GlobalValue<'v>, InternalError> {
@@ -249,7 +253,29 @@ impl<'a, 'v> GlobalTypesBuilder<'a, 'v> {
             Some(SpecialBuiltinFunction::Record) => self.record(args),
             Some(SpecialBuiltinFunction::Field) => self.field(args),
             Some(SpecialBuiltinFunction::Enum) => self.enumeration(args),
-            _ => Ok(GlobalValue::any()),
+            _ => self.call_result(span, &callee.ty),
+        }
+    }
+
+    /// The type of a call to `callee` with arguments the pre-pass does not
+    /// look at: what the oracle gives a call with `*Any` and `**Any`, which no
+    /// signature rejects. The call is never run and its arguments are never
+    /// checked, so the result has a type and never a value.
+    fn call_result(&self, span: Span, callee: &Ty) -> Result<GlobalValue<'v>, InternalError> {
+        let any = Spanned {
+            span,
+            node: Ty::any(),
+        };
+        let args = TyCallArgs {
+            pos: Vec::new(),
+            named: Vec::new(),
+            args: Some(any.clone()),
+            kwargs: Some(any),
+        };
+        match self.ctx.validate_call(span, callee, &args) {
+            Ok(ty) => Ok(GlobalValue::ty(ty)),
+            Err(TypingOrInternalError::Typing(_)) => Ok(GlobalValue::any()),
+            Err(TypingOrInternalError::Internal(e)) => Err(e),
         }
     }
 
@@ -538,8 +564,21 @@ impl<'a, 'v> GlobalTypesBuilder<'a, 'v> {
         field: &AstString,
     ) -> Result<GlobalValue<'v>, InternalError> {
         let object = self.expr(object)?;
-        if let Some(object) = object.value {
-            match object.get_attr_error(field.as_str(), self.heap) {
+        if let Some(value) = object.value {
+            match value.get_attr_error(field.as_str(), self.heap) {
+                // A bound method has no type of its own: it has the type the
+                // checker gives the attribute, so a call of it
+                // (`"a,b".split(",")`) has the method's return type.
+                Ok(v) if v.downcast_ref::<BoundMethod>().is_some() => {
+                    let ty = self
+                        .ctx
+                        .expr_dot(span, &object.ty, field.as_str())
+                        .unwrap_or_else(|_| Ty::of_value(v));
+                    Ok(GlobalValue {
+                        ty,
+                        ..GlobalValue::value(v)
+                    })
+                }
                 Ok(v) => Ok(GlobalValue::value(v)),
                 Err(e) => Ok(self.err(span, e)),
             }
@@ -616,7 +655,7 @@ impl<'a, 'v> GlobalTypesBuilder<'a, 'v> {
         match &expr.node {
             ExprP::Tuple(xs) => self.tuple(xs),
             ExprP::Dot(object, field) => self.dot(span, object, field),
-            ExprP::Call(f, args) => self.call(f, args),
+            ExprP::Call(f, args) => self.call(span, f, args),
             ExprP::Index(a_i) => {
                 let (a, i) = &**a_i;
                 self.index(span, a, i)
