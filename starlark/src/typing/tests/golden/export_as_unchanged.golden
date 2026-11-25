@@ -1,0 +1,607 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Lib.name: Lib
+Lib instance: Lib
+Ty {
+    alternatives: [
+        Custom(
+            TyCustom(
+                TyUser {
+                    name: "Lib",
+                    base: TyStarlarkValue {
+                        type_name: "record",
+                        ..
+                    },
+                    supertypes: [],
+                    matcher: Some(
+                        TypeMatcherFactory {
+                            factory: TypeMatcherFactoryImpl {
+                                matcher: RecordTypeMatcher {
+                                    id: TypeInstanceId(#0),
+                                },
+                            },
+                        },
+                    ),
+                    id: TypeInstanceId(#0),
+                    fields: TyUserFields {
+                        known: SortedMap {
+                            map: OrderedMap(
+                                {
+                                    "name": Ty {
+                                        alternatives: [
+                                            StarlarkValue(
+                                                TyStarlarkValue {
+                                                    type_name: "string",
+                                                    ..
+                                                },
+                                            ),
+                                        ],
+                                    },
+                                    "opt": Ty {
+                                        alternatives: [
+                                            StarlarkValue(
+                                                TyStarlarkValue {
+                                                    type_name: "NoneType",
+                                                    ..
+                                                },
+                                            ),
+                                            StarlarkValue(
+                                                TyStarlarkValue {
+                                                    type_name: "string",
+                                                    ..
+                                                },
+                                            ),
+                                        ],
+                                    },
+                                    "port": Ty {
+                                        alternatives: [
+                                            StarlarkValue(
+                                                TyStarlarkValue {
+                                                    type_name: "int",
+                                                    ..
+                                                },
+                                            ),
+                                        ],
+                                    },
+                                    "srcs": Ty {
+                                        alternatives: [
+                                            List(
+                                                ArcTy(
+                                                    Str,
+                                                ),
+                                            ),
+                                        ],
+                                    },
+                                },
+                            ),
+                        },
+                        unknown: false,
+                    },
+                    callable: None,
+                    index: None,
+                    iter_item: None,
+                },
+            ),
+        ),
+    ],
+}
+Lib type: record[Lib]
+Ty {
+    alternatives: [
+        Custom(
+            TyCustom(
+                TyUser {
+                    name: "record[Lib]",
+                    base: TyStarlarkValue {
+                        type_name: "function",
+                        ..
+                    },
+                    supertypes: [],
+                    matcher: None,
+                    id: TypeInstanceId(#1),
+                    fields: TyUserFields {
+                        known: SortedMap {
+                            map: OrderedMap(
+                                {},
+                            ),
+                        },
+                        unknown: false,
+                    },
+                    callable: Some(
+                        TyCallable {
+                            inner: TyCallableInner {
+                                params: ParamSpec {
+                                    params: [
+                                        Param {
+                                            mode: NameOnly(
+                                                ArcStr(
+                                                    ArcOrStatic(
+                                                        Arc(
+                                                            "name",
+                                                        ),
+                                                    ),
+                                                ),
+                                                Yes,
+                                            ),
+                                            ty: Ty {
+                                                alternatives: [
+                                                    StarlarkValue(
+                                                        TyStarlarkValue {
+                                                            type_name: "string",
+                                                            ..
+                                                        },
+                                                    ),
+                                                ],
+                                            },
+                                        },
+                                        Param {
+                                            mode: NameOnly(
+                                                ArcStr(
+                                                    ArcOrStatic(
+                                                        Arc(
+                                                            "port",
+                                                        ),
+                                                    ),
+                                                ),
+                                                No,
+                                            ),
+                                            ty: Ty {
+                                                alternatives: [
+                                                    StarlarkValue(
+                                                        TyStarlarkValue {
+                                                            type_name: "int",
+                                                            ..
+                                                        },
+                                                    ),
+                                                ],
+                                            },
+                                        },
+                                        Param {
+                                            mode: NameOnly(
+                                                ArcStr(
+                                                    ArcOrStatic(
+                                                        Arc(
+                                                            "srcs",
+                                                        ),
+                                                    ),
+                                                ),
+                                                No,
+                                            ),
+                                            ty: Ty {
+                                                alternatives: [
+                                                    List(
+                                                        ArcTy(
+                                                            Str,
+                                                        ),
+                                                    ),
+                                                ],
+                                            },
+                                        },
+                                        Param {
+                                            mode: NameOnly(
+                                                ArcStr(
+                                                    ArcOrStatic(
+                                                        Arc(
+                                                            "opt",
+                                                        ),
+                                                    ),
+                                                ),
+                                                No,
+                                            ),
+                                            ty: Ty {
+                                                alternatives: [
+                                                    StarlarkValue(
+                                                        TyStarlarkValue {
+                                                            type_name: "NoneType",
+                                                            ..
+                                                        },
+                                                    ),
+                                                    StarlarkValue(
+                                                        TyStarlarkValue {
+                                                            type_name: "string",
+                                                            ..
+                                                        },
+                                                    ),
+                                                ],
+                                            },
+                                        },
+                                    ],
+                                    indices: DefParamIndices {
+                                        num_positional: 0,
+                                        num_positional_only: 0,
+                                        args: None,
+                                        kwargs: None,
+                                    },
+                                },
+                                result: Ty {
+                                    alternatives: [
+                                        Custom(
+                                            TyCustom(
+                                                TyUser {
+                                                    name: "Lib",
+                                                    base: TyStarlarkValue {
+                                                        type_name: "record",
+                                                        ..
+                                                    },
+                                                    supertypes: [],
+                                                    matcher: Some(
+                                                        TypeMatcherFactory {
+                                                            factory: TypeMatcherFactoryImpl {
+                                                                matcher: RecordTypeMatcher {
+                                                                    id: TypeInstanceId(#0),
+                                                                },
+                                                            },
+                                                        },
+                                                    ),
+                                                    id: TypeInstanceId(#0),
+                                                    fields: TyUserFields {
+                                                        known: SortedMap {
+                                                            map: OrderedMap(
+                                                                {
+                                                                    "name": Ty {
+                                                                        alternatives: [
+                                                                            StarlarkValue(
+                                                                                TyStarlarkValue {
+                                                                                    type_name: "string",
+                                                                                    ..
+                                                                                },
+                                                                            ),
+                                                                        ],
+                                                                    },
+                                                                    "opt": Ty {
+                                                                        alternatives: [
+                                                                            StarlarkValue(
+                                                                                TyStarlarkValue {
+                                                                                    type_name: "NoneType",
+                                                                                    ..
+                                                                                },
+                                                                            ),
+                                                                            StarlarkValue(
+                                                                                TyStarlarkValue {
+                                                                                    type_name: "string",
+                                                                                    ..
+                                                                                },
+                                                                            ),
+                                                                        ],
+                                                                    },
+                                                                    "port": Ty {
+                                                                        alternatives: [
+                                                                            StarlarkValue(
+                                                                                TyStarlarkValue {
+                                                                                    type_name: "int",
+                                                                                    ..
+                                                                                },
+                                                                            ),
+                                                                        ],
+                                                                    },
+                                                                    "srcs": Ty {
+                                                                        alternatives: [
+                                                                            List(
+                                                                                ArcTy(
+                                                                                    Str,
+                                                                                ),
+                                                                            ),
+                                                                        ],
+                                                                    },
+                                                                },
+                                                            ),
+                                                        },
+                                                        unknown: false,
+                                                    },
+                                                    callable: None,
+                                                    index: None,
+                                                    iter_item: None,
+                                                },
+                                            ),
+                                        ),
+                                    ],
+                                },
+                            },
+                        },
+                    ),
+                    index: None,
+                    iter_item: None,
+                },
+            ),
+        ),
+    ],
+}
+Lib2.name: Lib, instance: Lib, type: record[Lib]
+Mode.name: Mode
+Mode value: Mode
+Ty {
+    alternatives: [
+        Custom(
+            TyCustom(
+                TyUser {
+                    name: "Mode",
+                    base: TyStarlarkValue {
+                        type_name: "enum",
+                        ..
+                    },
+                    supertypes: [],
+                    matcher: Some(
+                        TypeMatcherFactory {
+                            factory: TypeMatcherFactoryImpl {
+                                matcher: EnumTypeMatcher {
+                                    id: TypeInstanceId(#2),
+                                },
+                            },
+                        },
+                    ),
+                    id: TypeInstanceId(#2),
+                    fields: TyUserFields {
+                        known: SortedMap {
+                            map: OrderedMap(
+                                {},
+                            ),
+                        },
+                        unknown: false,
+                    },
+                    callable: None,
+                    index: None,
+                    iter_item: None,
+                },
+            ),
+        ),
+    ],
+}
+Mode type: enum[Mode]
+Ty {
+    alternatives: [
+        Custom(
+            TyCustom(
+                TyUser {
+                    name: "enum[Mode]",
+                    base: TyStarlarkValue {
+                        type_name: "function",
+                        ..
+                    },
+                    supertypes: [],
+                    matcher: None,
+                    id: TypeInstanceId(#3),
+                    fields: TyUserFields {
+                        known: SortedMap {
+                            map: OrderedMap(
+                                {
+                                    "debug": Ty {
+                                        alternatives: [
+                                            Custom(
+                                                TyCustom(
+                                                    TyUser {
+                                                        name: "Mode",
+                                                        base: TyStarlarkValue {
+                                                            type_name: "enum",
+                                                            ..
+                                                        },
+                                                        supertypes: [],
+                                                        matcher: Some(
+                                                            TypeMatcherFactory {
+                                                                factory: TypeMatcherFactoryImpl {
+                                                                    matcher: EnumTypeMatcher {
+                                                                        id: TypeInstanceId(#2),
+                                                                    },
+                                                                },
+                                                            },
+                                                        ),
+                                                        id: TypeInstanceId(#2),
+                                                        fields: TyUserFields {
+                                                            known: SortedMap {
+                                                                map: OrderedMap(
+                                                                    {},
+                                                                ),
+                                                            },
+                                                            unknown: false,
+                                                        },
+                                                        callable: None,
+                                                        index: None,
+                                                        iter_item: None,
+                                                    },
+                                                ),
+                                            ),
+                                        ],
+                                    },
+                                    "release": Ty {
+                                        alternatives: [
+                                            Custom(
+                                                TyCustom(
+                                                    TyUser {
+                                                        name: "Mode",
+                                                        base: TyStarlarkValue {
+                                                            type_name: "enum",
+                                                            ..
+                                                        },
+                                                        supertypes: [],
+                                                        matcher: Some(
+                                                            TypeMatcherFactory {
+                                                                factory: TypeMatcherFactoryImpl {
+                                                                    matcher: EnumTypeMatcher {
+                                                                        id: TypeInstanceId(#2),
+                                                                    },
+                                                                },
+                                                            },
+                                                        ),
+                                                        id: TypeInstanceId(#2),
+                                                        fields: TyUserFields {
+                                                            known: SortedMap {
+                                                                map: OrderedMap(
+                                                                    {},
+                                                                ),
+                                                            },
+                                                            unknown: false,
+                                                        },
+                                                        callable: None,
+                                                        index: None,
+                                                        iter_item: None,
+                                                    },
+                                                ),
+                                            ),
+                                        ],
+                                    },
+                                },
+                            ),
+                        },
+                        unknown: false,
+                    },
+                    callable: Some(
+                        TyCallable {
+                            inner: TyCallableInner {
+                                params: ParamSpec {
+                                    params: [
+                                        Param {
+                                            mode: PosOnly(
+                                                Yes,
+                                            ),
+                                            ty: Ty {
+                                                alternatives: [
+                                                    Any,
+                                                ],
+                                            },
+                                        },
+                                    ],
+                                    indices: DefParamIndices {
+                                        num_positional: 1,
+                                        num_positional_only: 1,
+                                        args: None,
+                                        kwargs: None,
+                                    },
+                                },
+                                result: Ty {
+                                    alternatives: [
+                                        Custom(
+                                            TyCustom(
+                                                TyUser {
+                                                    name: "Mode",
+                                                    base: TyStarlarkValue {
+                                                        type_name: "enum",
+                                                        ..
+                                                    },
+                                                    supertypes: [],
+                                                    matcher: Some(
+                                                        TypeMatcherFactory {
+                                                            factory: TypeMatcherFactoryImpl {
+                                                                matcher: EnumTypeMatcher {
+                                                                    id: TypeInstanceId(#2),
+                                                                },
+                                                            },
+                                                        },
+                                                    ),
+                                                    id: TypeInstanceId(#2),
+                                                    fields: TyUserFields {
+                                                        known: SortedMap {
+                                                            map: OrderedMap(
+                                                                {},
+                                                            ),
+                                                        },
+                                                        unknown: false,
+                                                    },
+                                                    callable: None,
+                                                    index: None,
+                                                    iter_item: None,
+                                                },
+                                            ),
+                                        ),
+                                    ],
+                                },
+                            },
+                        },
+                    ),
+                    index: Some(
+                        TyUserIndex {
+                            index: Ty {
+                                alternatives: [
+                                    StarlarkValue(
+                                        TyStarlarkValue {
+                                            type_name: "int",
+                                            ..
+                                        },
+                                    ),
+                                ],
+                            },
+                            result: Ty {
+                                alternatives: [
+                                    Custom(
+                                        TyCustom(
+                                            TyUser {
+                                                name: "Mode",
+                                                base: TyStarlarkValue {
+                                                    type_name: "enum",
+                                                    ..
+                                                },
+                                                supertypes: [],
+                                                matcher: Some(
+                                                    TypeMatcherFactory {
+                                                        factory: TypeMatcherFactoryImpl {
+                                                            matcher: EnumTypeMatcher {
+                                                                id: TypeInstanceId(#2),
+                                                            },
+                                                        },
+                                                    },
+                                                ),
+                                                id: TypeInstanceId(#2),
+                                                fields: TyUserFields {
+                                                    known: SortedMap {
+                                                        map: OrderedMap(
+                                                            {},
+                                                        ),
+                                                    },
+                                                    unknown: false,
+                                                },
+                                                callable: None,
+                                                index: None,
+                                                iter_item: None,
+                                            },
+                                        ),
+                                    ),
+                                ],
+                            },
+                        },
+                    ),
+                    iter_item: Some(
+                        Ty {
+                            alternatives: [
+                                Custom(
+                                    TyCustom(
+                                        TyUser {
+                                            name: "Mode",
+                                            base: TyStarlarkValue {
+                                                type_name: "enum",
+                                                ..
+                                            },
+                                            supertypes: [],
+                                            matcher: Some(
+                                                TypeMatcherFactory {
+                                                    factory: TypeMatcherFactoryImpl {
+                                                        matcher: EnumTypeMatcher {
+                                                            id: TypeInstanceId(#2),
+                                                        },
+                                                    },
+                                                },
+                                            ),
+                                            id: TypeInstanceId(#2),
+                                            fields: TyUserFields {
+                                                known: SortedMap {
+                                                    map: OrderedMap(
+                                                        {},
+                                                    ),
+                                                },
+                                                unknown: false,
+                                            },
+                                            callable: None,
+                                            index: None,
+                                            iter_item: None,
+                                        },
+                                    ),
+                                ),
+                            ],
+                        },
+                    ),
+                },
+            ),
+        ),
+    ],
+}

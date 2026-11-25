@@ -354,6 +354,21 @@ where
         variable_name: &str,
         _eval: &mut Evaluator<'v, '_, '_>,
     ) -> crate::Result<()> {
+        self.init_ty(variable_name)
+    }
+}
+
+impl<'v, V> EnumTypeGen<V>
+where
+    Value<'v>: Equivalent<V>,
+    V: ValueLike<'v> + EnumCell,
+{
+    /// Name the enum type `variable_name` and compute its types, unless it is
+    /// already named: the first name an enum type is assigned to sticks.
+    ///
+    /// This is what `export_as` does, without an `Evaluator`, so the lint
+    /// typechecker names an enum type it builds exactly as evaluation does.
+    pub(crate) fn init_ty(&self, variable_name: &str) -> crate::Result<()> {
         V::get_or_init_ty(&self.ty_enum_data, || {
             let ty_enum_value = Ty::custom(TyUser::new(
                 variable_name.to_owned(),

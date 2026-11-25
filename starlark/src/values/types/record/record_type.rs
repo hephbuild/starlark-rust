@@ -214,6 +214,65 @@ where
             }),
         )
     }
+
+    /// Name the record type `variable_name` and compute its types, unless it
+    /// is already named: the first name a record type is assigned to sticks.
+    ///
+    /// This is what `export_as` does, without an `Evaluator`, so the lint
+    /// typechecker names a record type it builds exactly as evaluation does.
+    pub(crate) fn init_ty(&self, variable_name: &str) -> crate::Result<()> {
+        V::get_or_init_ty(&self.ty_record_data, || {
+            let fields: SortedMap<String, Ty> = self
+                .fields
+                .iter()
+                .map(|(name, field)| (name.clone(), field.ty()))
+                .collect();
+
+            let ty_record = Ty::custom(TyUser::new(
+                variable_name.to_owned(),
+                TyStarlarkValue::new::<Record>(),
+                self.id,
+                TyUserParams {
+                    matcher: Some(TypeMatcherFactory::new(RecordTypeMatcher { id: self.id })),
+                    fields: TyUserFields {
+                        known: fields,
+                        unknown: false,
+                    },
+                    ..TyUserParams::default()
+                },
+            )?);
+
+            let ty_record_type = Ty::custom(TyUser::new(
+                format!("record[{variable_name}]"),
+                TyStarlarkValue::new::<RecordType>(),
+                TypeInstanceId::r#gen(),
+                TyUserParams {
+                    callable: Some(TyCallable::new(
+                        ParamSpec::new_named_only(self.fields.iter().map(|(name, field)| {
+                            (
+                                ArcStr::from(name.as_str()),
+                                if field.default.is_some() {
+                                    ParamIsRequired::No
+                                } else {
+                                    ParamIsRequired::Yes
+                                },
+                                field.ty(),
+                            )
+                        }))?,
+                        ty_record.dupe(),
+                    )),
+                    ..TyUserParams::default()
+                },
+            )?);
+
+            Ok(Arc::new(TyRecordData {
+                name: variable_name.to_owned(),
+                ty_record,
+                ty_record_type,
+                parameter_spec: Self::make_parameter_spec(variable_name, &self.fields),
+            }))
+        })
+    }
 }
 
 starlark::methods_static!(RECORD_TYPE_METHODS = record_type_methods);
@@ -301,57 +360,7 @@ where
         variable_name: &str,
         _eval: &mut Evaluator<'v, '_, '_>,
     ) -> crate::Result<()> {
-        V::get_or_init_ty(&self.ty_record_data, || {
-            let fields: SortedMap<String, Ty> = self
-                .fields
-                .iter()
-                .map(|(name, field)| (name.clone(), field.ty()))
-                .collect();
-
-            let ty_record = Ty::custom(TyUser::new(
-                variable_name.to_owned(),
-                TyStarlarkValue::new::<Record>(),
-                self.id,
-                TyUserParams {
-                    matcher: Some(TypeMatcherFactory::new(RecordTypeMatcher { id: self.id })),
-                    fields: TyUserFields {
-                        known: fields,
-                        unknown: false,
-                    },
-                    ..TyUserParams::default()
-                },
-            )?);
-
-            let ty_record_type = Ty::custom(TyUser::new(
-                format!("record[{variable_name}]"),
-                TyStarlarkValue::new::<RecordType>(),
-                TypeInstanceId::r#gen(),
-                TyUserParams {
-                    callable: Some(TyCallable::new(
-                        ParamSpec::new_named_only(self.fields.iter().map(|(name, field)| {
-                            (
-                                ArcStr::from(name.as_str()),
-                                if field.default.is_some() {
-                                    ParamIsRequired::No
-                                } else {
-                                    ParamIsRequired::Yes
-                                },
-                                field.ty(),
-                            )
-                        }))?,
-                        ty_record.dupe(),
-                    )),
-                    ..TyUserParams::default()
-                },
-            )?);
-
-            Ok(Arc::new(TyRecordData {
-                name: variable_name.to_owned(),
-                ty_record,
-                ty_record_type,
-                parameter_spec: Self::make_parameter_spec(variable_name, &self.fields),
-            }))
-        })
+        self.init_ty(variable_name)
     }
 }
 
