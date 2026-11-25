@@ -1,0 +1,27 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+f: args param tuple
+f: g local typing.Callable
+f: i local typing.Any
+f: inner local def(z: str) -> typing.Any
+f: kwargs param dict[str, typing.Any]
+f: n comprehension str
+f: names local list[str]
+f: q lambda typing.Any
+f: x param int
+f: y local int
+f.inner: w local str
+f.inner: z param str
+h: x param str
+--
+Lib: record[Lib] as_type=Some("Lib") declared_line=Some(3)
+Lib2: record[Lib] as_type=Some("Lib") declared_line=Some(3)
+Mode: enum[Mode] as_type=Some("Mode") declared_line=Some(5)
+_Loaded: record[Lib] as_type=Some("Lib") declared_line=None
+_private: typing.Any as_type=None declared_line=None
+f: def(x: int, *args: typing.Any, **kwargs: typing.Any) -> def(z: str) -> typing.Any as_type=None declared_line=None
+h: def(x: str) -> None as_type=None declared_line=None

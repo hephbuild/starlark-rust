@@ -67,6 +67,8 @@ pub use ty::Approximation;
 pub use ty::Ty;
 pub use ty::TypeRenderConfig;
 pub use typecheck::AstModuleTypecheck;
+pub use typecheck::BindingKind;
+pub use typecheck::ModuleBinding;
 pub use typecheck::TypeMap;
 pub use typed_kwargs::TyTypedKwargs;
 pub use user::TyUser;

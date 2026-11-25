@@ -23,12 +23,20 @@ use std::fmt::Display;
 use dupe::Dupe;
 use starlark_map::unordered_map::UnorderedMap;
 use starlark_syntax::slice_vec_ext::VecExt;
+use starlark_syntax::syntax::ast::AssignP;
+use starlark_syntax::syntax::ast::AssignTargetP;
+use starlark_syntax::syntax::ast::ClauseP;
+use starlark_syntax::syntax::ast::DefP;
+use starlark_syntax::syntax::ast::ExprP;
+use starlark_syntax::syntax::ast::ForP;
 use starlark_syntax::syntax::ast::StmtP;
 use starlark_syntax::syntax::ast::Visibility;
 use starlark_syntax::syntax::module::AstModuleFields;
 use starlark_syntax::syntax::top_level_stmts::top_level_stmts_mut;
+use starlark_syntax::syntax::uniplate::Visit;
 
 use crate::codemap::CodeMap;
+use crate::codemap::FileSpan;
 use crate::codemap::FileSpanRef;
 use crate::codemap::Span;
 use crate::codemap::Spanned;
@@ -40,7 +48,10 @@ use crate::eval::compiler::scope::BindingSource;
 use crate::eval::compiler::scope::ModuleScopeData;
 use crate::eval::compiler::scope::ModuleScopes;
 use crate::eval::compiler::scope::Slot;
+use crate::eval::compiler::scope::payload::CstAssignIdent;
 use crate::eval::compiler::scope::payload::CstAssignIdentExt;
+use crate::eval::compiler::scope::payload::CstExpr;
+use crate::eval::compiler::scope::payload::CstPayload;
 use crate::eval::compiler::scope::payload::CstStmt;
 use crate::eval::compiler::scope::scope_resolver_globals::ScopeResolverGlobals;
 use crate::syntax::AstModule;
@@ -60,6 +71,7 @@ use crate::typing::oracle::ctx::TypingOracleCtx;
 use crate::typing::ty::Approximation;
 use crate::typing::ty::Ty;
 use crate::values::FrozenHeap;
+use crate::values::typing::TypeInstanceId;
 
 /// What [`solve_bindings`] returns: errors, binding types, approximations, and
 /// the inferred type of the collected `def` when it has no return annotation.
@@ -291,11 +303,172 @@ fn infer_top_level_returns(
     Ok(())
 }
 
+/// How a name inside a `def` is bound.
+#[derive(Debug, Clone, Copy, Dupe, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum BindingKind {
+    /// A parameter of the def, `*args` and `**kwargs` included.
+    Param,
+    /// Assigned in the def's body: `x = ...`, `x += ...`, a `for` variable,
+    /// or a nested `def`'s name.
+    Local,
+    /// A comprehension's `for` variable.
+    Comprehension,
+    /// A lambda's parameter.
+    Lambda,
+}
+
+impl BindingKind {
+    /// The kind as a stable identifier.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BindingKind::Param => "param",
+            BindingKind::Local => "local",
+            BindingKind::Comprehension => "comprehension",
+            BindingKind::Lambda => "lambda",
+        }
+    }
+}
+
+/// The def path that owns each binding inside a top-level `def`, and how the
+/// binding is made. A comprehension's or a lambda's binding is owned by the
+/// def it is in. The first way a binding is made wins (a parameter assigned
+/// in the body stays a parameter).
+struct DefBindingOwners<'c> {
+    codemap: &'c CodeMap,
+    path: Vec<String>,
+    owners: UnorderedMap<BindingId, (Vec<String>, BindingKind)>,
+}
+
+impl DefBindingOwners<'_> {
+    fn bind(&mut self, ident: &CstAssignIdent, kind: BindingKind) -> Result<(), InternalError> {
+        let id = ident.resolved_binding_id(self.codemap)?;
+        if self.owners.get(&id).is_none() {
+            self.owners.insert(id, (self.path.clone(), kind));
+        }
+        Ok(())
+    }
+
+    fn bind_target(
+        &mut self,
+        target: &AssignTargetP<CstPayload>,
+        kind: BindingKind,
+    ) -> Result<(), InternalError> {
+        match target {
+            AssignTargetP::Identifier(ident) => self.bind(ident, kind),
+            AssignTargetP::Tuple(xs) => {
+                for x in xs {
+                    self.bind_target(x, kind)?;
+                }
+                Ok(())
+            }
+            AssignTargetP::Index(_) | AssignTargetP::Dot(..) => Ok(()),
+        }
+    }
+
+    fn def(&mut self, def: &DefP<CstPayload>) -> Result<(), InternalError> {
+        // Defaults and annotations are evaluated in the enclosing scope.
+        let mut outer = Vec::new();
+        for param in &def.params {
+            param.node.visit_expr(|x| outer.push(x));
+        }
+        for x in outer {
+            self.expr(x)?;
+        }
+        self.path.push(def.name.ident.clone());
+        for param in &def.params {
+            if let Some(ident) = param.node.ident() {
+                self.bind(ident, BindingKind::Param)?;
+            }
+        }
+        self.stmt(&def.body)?;
+        self.path.pop();
+        Ok(())
+    }
+
+    fn stmt(&mut self, stmt: &CstStmt) -> Result<(), InternalError> {
+        match &stmt.node {
+            StmtP::Def(def) => {
+                self.bind(&def.name, BindingKind::Local)?;
+                return self.def(def);
+            }
+            StmtP::Assign(AssignP { lhs, .. }) | StmtP::AssignModify(lhs, ..) => {
+                self.bind_target(lhs, BindingKind::Local)?
+            }
+            StmtP::For(ForP { var, .. }) => self.bind_target(var, BindingKind::Local)?,
+            _ => {}
+        }
+        stmt.visit_children_err(|x| match x {
+            Visit::Stmt(x) => self.stmt(x),
+            Visit::Expr(x) => self.expr(x),
+        })
+    }
+
+    fn expr(&mut self, expr: &CstExpr) -> Result<(), InternalError> {
+        match &expr.node {
+            ExprP::Lambda(lambda) => {
+                for param in &lambda.params {
+                    if let Some(ident) = param.node.ident() {
+                        self.bind(ident, BindingKind::Lambda)?;
+                    }
+                }
+            }
+            ExprP::ListComprehension(_, for1, clauses)
+            | ExprP::DictComprehension(_, for1, clauses) => {
+                self.bind_target(&for1.var, BindingKind::Comprehension)?;
+                for clause in clauses {
+                    if let ClauseP::For(clause) = clause {
+                        self.bind_target(&clause.var, BindingKind::Comprehension)?;
+                    }
+                }
+            }
+            _ => {}
+        }
+        expr.visit_expr_err(|x| self.expr(x))
+    }
+}
+
+/// A binding inside a top-level `def`.
+#[derive(Debug)]
+struct DefBinding {
+    owner: Vec<String>,
+    name: String,
+    kind: BindingKind,
+    span: Span,
+    ty: Ty,
+}
+
+/// A module-level name, as [`TypeMap::module_bindings`] reports it.
+#[derive(Debug)]
+pub struct ModuleBinding<'a> {
+    /// The name.
+    pub name: &'a str,
+    /// The type of its value.
+    pub ty: &'a Ty,
+    /// The type it denotes in a type annotation, when it is a type (a
+    /// record, an enum or an alias such as `Names = list[str]`).
+    pub as_type: Option<&'a Ty>,
+    /// For a record or enum type this module declares: the type's id (the
+    /// one its instances' type carries), and the binding that named it.
+    pub declaration: Option<(TypeInstanceId, FileSpan)>,
+}
+
+#[derive(Debug)]
+struct ModuleBindingData {
+    name: String,
+    ty: Ty,
+    as_type: Option<Ty>,
+    declaration: Option<(TypeInstanceId, Span)>,
+}
+
 /// Structure containing all the inferred types.
 #[derive(Debug)]
 pub struct TypeMap {
     codemap: CodeMap,
     bindings: UnorderedMap<BindingId, (String, Span, Ty)>,
+    /// Sorted by owner, name and position.
+    def_bindings: Vec<DefBinding>,
+    /// Sorted by name.
+    module_bindings: Vec<ModuleBindingData>,
 }
 
 impl Display for TypeMap {
@@ -318,6 +491,46 @@ impl Display for TypeMap {
 }
 
 impl TypeMap {
+    fn empty(codemap: CodeMap) -> TypeMap {
+        TypeMap {
+            codemap,
+            bindings: UnorderedMap::new(),
+            def_bindings: Vec::new(),
+            module_bindings: Vec::new(),
+        }
+    }
+
+    /// Each binding inside a top-level `def`: the def path that owns it
+    /// (`["f"]`, or `["f", "g"]` for a def nested in `f`), its name, how it is
+    /// bound, and its type. A comprehension's or a lambda's binding is owned
+    /// by the def it is in. Sorted by owner, name and position; one name can
+    /// be bound more than once under one owner (a local and a comprehension
+    /// variable).
+    pub fn bindings(&self) -> impl Iterator<Item = (&[String], &str, BindingKind, &Ty)> {
+        self.def_bindings
+            .iter()
+            .map(|b| (b.owner.as_slice(), b.name.as_str(), b.kind, &b.ty))
+    }
+
+    /// Each module-level name, private and loaded names included, sorted by
+    /// name.
+    pub fn module_bindings(&self) -> impl Iterator<Item = ModuleBinding<'_>> {
+        self.module_bindings.iter().map(|b| ModuleBinding {
+            name: &b.name,
+            ty: &b.ty,
+            as_type: b.as_type.as_ref(),
+            declaration: b.declaration.map(|(id, span)| {
+                (
+                    id,
+                    FileSpan {
+                        file: self.codemap.dupe(),
+                        span,
+                    },
+                )
+            }),
+        })
+    }
+
     #[cfg(test)]
     pub(crate) fn find_bindings_by_name<'a>(&'a self, name: &str) -> Vec<&'a Ty> {
         self.bindings
@@ -394,10 +607,7 @@ impl AstModuleTypecheck for AstModule {
             Err(e) => {
                 return (
                     vec![InternalError::into_error(e)],
-                    TypeMap {
-                        codemap,
-                        bindings: UnorderedMap::new(),
-                    },
+                    TypeMap::empty(codemap),
                     Interface::default(),
                     Vec::new(),
                 );
@@ -414,10 +624,7 @@ impl AstModuleTypecheck for AstModule {
         ) {
             return (
                 vec![InternalError::into_error(e)],
-                TypeMap {
-                    codemap,
-                    bindings: UnorderedMap::new(),
-                },
+                TypeMap::empty(codemap),
                 Interface::default(),
                 Vec::new(),
             );
@@ -438,10 +645,7 @@ impl AstModuleTypecheck for AstModule {
                     Err(e) => {
                         return (
                             vec![InternalError::into_error(e)],
-                            TypeMap {
-                                codemap,
-                                bindings: UnorderedMap::new(),
-                            },
+                            TypeMap::empty(codemap),
                             Interface::default(),
                             Vec::new(),
                         );
@@ -453,10 +657,7 @@ impl AstModuleTypecheck for AstModule {
                         Err(e) => {
                             return (
                                 vec![e.into_error()],
-                                TypeMap {
-                                    codemap,
-                                    bindings: UnorderedMap::new(),
-                                },
+                                TypeMap::empty(codemap),
                                 Interface::default(),
                                 Vec::new(),
                             );
@@ -478,9 +679,77 @@ impl AstModuleTypecheck for AstModule {
             }
         }
 
+        let mut owners = DefBindingOwners {
+            codemap: &codemap,
+            path: Vec::new(),
+            owners: UnorderedMap::new(),
+        };
+        for top in cst.iter() {
+            if let StmtP::Def(def) = &top.node {
+                if let Err(e) = owners.def(def) {
+                    return (
+                        vec![InternalError::into_error(e)],
+                        TypeMap::empty(codemap),
+                        Interface::default(),
+                        Vec::new(),
+                    );
+                }
+            }
+        }
+        let mut def_bindings: Vec<DefBinding> = owners
+            .owners
+            .into_hash_map()
+            .into_iter()
+            .map(|(id, (owner, kind))| {
+                let binding = scope_data.get_binding(id);
+                let span = match binding.source {
+                    BindingSource::Source(span) => span,
+                    BindingSource::FromModule => Span::default(),
+                };
+                // A lambda's parameter is not solved: it is `Any`.
+                let ty = match typemap.get(&id) {
+                    Some((_, _, ty)) => ty.clone(),
+                    None => Ty::any(),
+                };
+                DefBinding {
+                    owner,
+                    name: binding.name.as_str().to_owned(),
+                    kind,
+                    span,
+                    ty,
+                }
+            })
+            .collect();
+        def_bindings.sort_by(|a, b| {
+            (&a.owner, &a.name, a.span.begin(), a.kind).cmp(&(
+                &b.owner,
+                &b.name,
+                b.span.begin(),
+                b.kind,
+            ))
+        });
+
+        let mut module_bindings: Vec<ModuleBindingData> = names
+            .all_names_slots_and_visibilities()
+            .into_iter()
+            .map(|(name, slot, _)| ModuleBindingData {
+                name: name.as_str().to_owned(),
+                ty: module_var_types
+                    .types
+                    .get(&slot)
+                    .cloned()
+                    .unwrap_or_else(Ty::any),
+                as_type: module_var_types.as_types.get(&slot).cloned(),
+                declaration: module_var_types.declarations.get(&slot).copied(),
+            })
+            .collect();
+        module_bindings.sort_by(|a, b| a.name.cmp(&b.name));
+
         let typemap = TypeMap {
             bindings: typemap,
             codemap: codemap.dupe(),
+            def_bindings,
+            module_bindings,
         };
 
         let errors = [scope_errors, fill_types_errors, all_solve_errors]

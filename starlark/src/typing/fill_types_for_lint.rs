@@ -80,6 +80,7 @@ use crate::values::record::field::FieldGen;
 use crate::values::record::record_type::RecordType;
 use crate::values::tuple::AllocTuple;
 use crate::values::types::ellipsis::Ellipsis;
+use crate::values::typing::TypeInstanceId;
 use crate::values::typing::type_compiled::compiled::TypeCompiled;
 
 /// Why the pre-pass types a `record(...)` or `enum(...)` declaration as
@@ -203,6 +204,16 @@ impl<'v> GlobalValue<'v> {
         }
     }
 
+    /// The id of the record or enum type this is.
+    fn declared_id(&self) -> Option<TypeInstanceId> {
+        let value = self.value?;
+        if let Some(record) = value.downcast_ref::<RecordType>() {
+            Some(record.id)
+        } else {
+            value.downcast_ref::<EnumType>().map(|e| e.id)
+        }
+    }
+
     /// The type this name denotes in a type annotation, when it is a type:
     /// its value's, or the one a loaded name carries.
     fn denoted_type(&self, heap: Heap<'v>) -> Option<Ty> {
@@ -235,6 +246,9 @@ struct GlobalTypesBuilder<'a, 'v> {
     values: UnorderedMap<ModuleSlotId, GlobalValue<'v>>,
     /// Each binding of a record or enum declaration typed as `Any`, and why.
     declaration_approximations: UnorderedMap<BindingId, DeclarationApproximation>,
+    /// Where each record or enum type was named: the binding `init_ty` named
+    /// it after, so `Lib2 = Lib` leaves `Lib`'s.
+    declarations: UnorderedMap<TypeInstanceId, Span>,
     errors: Vec<TypingError>,
     module_scope_data: &'a ModuleScopeData<'a>,
     ctx: TypingOracleCtx<'a>,
@@ -728,21 +742,26 @@ impl<'a, 'v> GlobalTypesBuilder<'a, 'v> {
     /// Name a record or enum type bound to `ident`, as `export_as` does at
     /// evaluation, and type the binding with its now named type.
     fn export(
-        &self,
+        &mut self,
         ident: &CstAssignIdent,
         value: GlobalValue<'v>,
     ) -> Result<GlobalValue<'v>, InternalError> {
         let Some(v) = value.value else {
             return Ok(value);
         };
-        let named = if let Some(record) = v.downcast_ref::<RecordType>() {
-            record.init_ty(&ident.ident)
+        let (id, unnamed, named) = if let Some(record) = v.downcast_ref::<RecordType>() {
+            let unnamed = record.ty_record_data().is_none();
+            (record.id, unnamed, record.init_ty(&ident.ident))
         } else if let Some(enum_type) = v.downcast_ref::<EnumType>() {
-            enum_type.init_ty(&ident.ident)
+            let unnamed = enum_type.ty_enum_data().is_none();
+            (enum_type.id, unnamed, enum_type.init_ty(&ident.ident))
         } else {
             return Ok(value);
         };
         named.map_err(|e| InternalError::from_error(e, ident.span, self.ctx.codemap))?;
+        if unnamed {
+            self.declarations.insert(id, ident.span);
+        }
         Ok(GlobalValue::value(v))
     }
 
@@ -1258,6 +1277,9 @@ pub(crate) struct ModuleVarTypes {
     /// an alias such as `Names = list[str]`) denotes in a type annotation:
     /// from its value, or, for a loaded name, from its module's interface.
     pub(crate) as_types: UnorderedMap<ModuleSlotId, Ty>,
+    /// Each module-level name bound to a record or enum type this module
+    /// declares: the type's id, and the binding that named it.
+    pub(crate) declarations: UnorderedMap<ModuleSlotId, (TypeInstanceId, Span)>,
     /// Each binding of a record or enum declaration the pre-pass types as
     /// `Any`, top-level or in a def, and why.
     pub(crate) declaration_approximations: UnorderedMap<BindingId, DeclarationApproximation>,
@@ -1277,6 +1299,7 @@ pub(crate) fn fill_types_for_lint_typechecker(
             ctx,
             values: UnorderedMap::new(),
             declaration_approximations: UnorderedMap::new(),
+            declarations: UnorderedMap::new(),
             errors: Vec::new(),
             module_scope_data,
             approximations,
@@ -1288,11 +1311,19 @@ pub(crate) fn fill_types_for_lint_typechecker(
             errors,
             values,
             declaration_approximations,
+            declarations: declaration_spans,
             ..
         } = builder;
         let as_types = values
             .entries_unordered()
             .filter_map(|(slot, v)| Some((*slot, v.denoted_type(heap)?)))
+            .collect();
+        let declarations = values
+            .entries_unordered()
+            .filter_map(|(slot, v)| {
+                let id = v.declared_id()?;
+                Some((*slot, (id, *declaration_spans.get(&id)?)))
+            })
             .collect();
         let types = values.map_values(|v| v.ty);
         Ok((
@@ -1300,6 +1331,7 @@ pub(crate) fn fill_types_for_lint_typechecker(
             ModuleVarTypes {
                 types,
                 as_types,
+                declarations,
                 declaration_approximations,
             },
         ))

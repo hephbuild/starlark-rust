@@ -485,3 +485,72 @@ def distinct(o: Other):
 "#,
         );
 }
+
+/// I8: each binding in a def is reported with the def path that owns it and
+/// how it is bound; module bindings separately, private names included.
+#[test]
+fn bindings_report_owner_and_kind() {
+    let ast = AstModule::parse(
+        "filename",
+        r#"
+load("lib.star", _Loaded = "Lib")
+Lib = record(name = str)
+Lib2 = Lib
+Mode = enum("a", "b")
+_private = 1
+
+def f(x: int, *args, **kwargs):
+    y = x + 1
+    for i in range(y):
+        pass
+    def inner(z: str):
+        w = z
+        return w
+    names = [n for n in ["a"]]
+    g = lambda q: q
+    return inner
+
+def h(x: str):
+    pass
+"#
+        .to_owned(),
+        &Dialect::AllOptionsInternal,
+    )
+    .unwrap();
+    let (_, lib) = typecheck_only("Lib = record(name = str)", &[]);
+    let loads = [("lib.star".to_owned(), lib)].into_iter().collect();
+    let (errors, typemap, _, _) = ast.typecheck(&super::typecheck_globals(), &loads);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let mut out = String::new();
+    for (owner, name, kind, ty) in typemap.bindings() {
+        writeln!(out, "{}: {name} {} {ty}", owner.join("."), kind.as_str()).unwrap();
+    }
+    writeln!(out, "--").unwrap();
+    for b in typemap.module_bindings() {
+        let as_type = b.as_type.map(|t| t.to_string());
+        let declaration = b
+            .declaration
+            .map(|(_, span)| span.resolve_span().begin.line + 1);
+        writeln!(
+            out,
+            "{}: {} as_type={as_type:?} declared_line={declaration:?}",
+            b.name, b.ty
+        )
+        .unwrap();
+    }
+    golden_test_template(
+        "src/typing/tests/golden/bindings_report_owner_and_kind.golden",
+        &out,
+    );
+
+    // A record and its alias share one declaration: Lib's.
+    let ids: Vec<_> = typemap
+        .module_bindings()
+        .filter(|b| b.name == "Lib" || b.name == "Lib2")
+        .map(|b| b.declaration.map(|(id, _)| id))
+        .collect();
+    assert_eq!(ids.len(), 2);
+    assert!(ids[0].is_some());
+    assert_eq!(ids[0], ids[1]);
+}
