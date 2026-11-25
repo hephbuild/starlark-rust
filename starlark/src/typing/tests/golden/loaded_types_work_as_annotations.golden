@@ -1,0 +1,65 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+load("lib.star", "Lib", "Mode", "Names", L = "Lib")
+Libs = list[Lib]
+Opt = Lib | None
+
+def ok(l: Lib, m: Mode, n: Names, ls: Libs, o: Opt, a: L) -> str:
+    return l.name + m.value + n[0] + ls[0].name + a.name
+
+def bad_record(l: Lib):
+    l.nme
+
+def bad_enum(m: Mode):
+    m.nope
+
+def bad_alias(n: Names):
+    x: int = n[0]
+
+def bad_compound(ls: Libs):
+    ls[0].nme
+
+Error:
+error: The attribute `nme` is not available on the type `Lib`
+  --> filename:10:7
+   |
+10 |     l.nme
+   |       ^^^
+   |
+
+Error:
+error: The attribute `nope` is not available on the type `Mode`
+  --> filename:13:7
+   |
+13 |     m.nope
+   |       ^^^^
+   |
+
+Error:
+error: Expected type `int` but got `str`
+  --> filename:16:8
+   |
+16 |     x: int = n[0]
+   |        ^^^
+   |
+
+Error:
+error: The attribute `nme` is not available on the type `Lib`
+  --> filename:19:11
+   |
+19 |     ls[0].nme
+   |           ^^^
+   |
+
+Compiler typechecker (eval):
+error: The attribute `nme` is not available on the type `Lib`
+  --> filename:10:7
+   |
+10 |     l.nme
+   |       ^^^
+   |

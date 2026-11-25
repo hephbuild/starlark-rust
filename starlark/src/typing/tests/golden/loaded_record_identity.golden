@@ -1,0 +1,34 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+load("lib.star", "Lib", "Other")
+load("reexport.star", Lib2 = "Lib")
+
+def takes(l: Lib):
+    pass
+
+def same(l: Lib2):
+    takes(l)
+
+def distinct(o: Other):
+    takes(o)
+
+Error:
+error: Expected type `Lib` but got `Other`
+  --> filename:12:11
+   |
+12 |     takes(o)
+   |           ^
+   |
+
+Compiler typechecker (eval):
+error: Expected type `Lib` but got `Other`
+  --> filename:12:11
+   |
+12 |     takes(o)
+   |           ^
+   |

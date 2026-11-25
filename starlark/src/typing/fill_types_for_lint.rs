@@ -202,6 +202,15 @@ impl<'v> GlobalValue<'v> {
             (None, None) => None,
         }
     }
+
+    /// The type this name denotes in a type annotation, when it is a type:
+    /// its value's, or the one a loaded name carries.
+    fn denoted_type(&self, heap: Heap<'v>) -> Option<Ty> {
+        match (self.value, &self.as_type) {
+            (Some(value), _) => Some(TypeCompiled::new(value, heap).ok()?.as_ty().clone()),
+            (None, as_type) => as_type.clone(),
+        }
+    }
 }
 
 /// `record`, `field` or `enum` as starlark defines them: the native, found by
@@ -694,7 +703,11 @@ impl<'a, 'v> GlobalTypesBuilder<'a, 'v> {
     fn load(&mut self, load: &LoadP<CstPayload>) -> Result<(), InternalError> {
         for LoadArgP { local, their, .. } in &load.args {
             let ty = load.payload.get(their).cloned().unwrap_or_else(Ty::any);
-            self.assign_ident_value(local, GlobalValue::ty(ty))?;
+            let value = GlobalValue {
+                as_type: load.payload.get_type(their).cloned(),
+                ..GlobalValue::ty(ty)
+            };
+            self.assign_ident_value(local, value)?;
         }
         Ok(())
     }
@@ -1241,6 +1254,10 @@ impl<'a, 'v> GlobalTypesBuilder<'a, 'v> {
 #[derive(Default)]
 pub(crate) struct ModuleVarTypes {
     pub(crate) types: UnorderedMap<ModuleSlotId, Ty>,
+    /// The type each module-level name that is a type (a record, an enum or
+    /// an alias such as `Names = list[str]`) denotes in a type annotation:
+    /// from its value, or, for a loaded name, from its module's interface.
+    pub(crate) as_types: UnorderedMap<ModuleSlotId, Ty>,
     /// Each binding of a record or enum declaration the pre-pass types as
     /// `Any`, top-level or in a def, and why.
     pub(crate) declaration_approximations: UnorderedMap<BindingId, DeclarationApproximation>,
@@ -1273,11 +1290,16 @@ pub(crate) fn fill_types_for_lint_typechecker(
             declaration_approximations,
             ..
         } = builder;
+        let as_types = values
+            .entries_unordered()
+            .filter_map(|(slot, v)| Some((*slot, v.denoted_type(heap)?)))
+            .collect();
         let types = values.map_values(|v| v.ty);
         Ok((
             errors,
             ModuleVarTypes {
                 types,
+                as_types,
                 declaration_approximations,
             },
         ))

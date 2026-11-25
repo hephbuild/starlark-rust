@@ -395,3 +395,93 @@ def bad_parts():
 "#,
     );
 }
+
+const LIB: &str = r#"
+Lib = record(name = str)
+Mode = enum("debug", "release")
+Names = list[str]
+Other = record(name = str)
+F = field(str)
+cfg = Lib(name = "x")
+n = 1
+"#;
+
+/// A record, an enum and an alias keep the type they denote through
+/// `load()`; a value that is not a type has none.
+#[test]
+fn loaded_types_work_as_annotations() {
+    let (lib, lib_module) = crate::typing::tests::TypeCheck::new().check("loaded_types_lib", LIB);
+    let denoted = ["Lib", "Mode", "Names", "Other", "F", "cfg", "n"]
+        .iter()
+        .map(|name| match lib.get_type(name) {
+            Some(ty) => format!("{name}: {ty}\n"),
+            None => format!("{name}: -\n"),
+        })
+        .collect::<String>();
+    assert_eq!(
+        denoted,
+        "Lib: Lib\nMode: Mode\nNames: list[str]\nOther: Other\nF: -\ncfg: -\nn: -\n"
+    );
+
+    crate::typing::tests::TypeCheck::new()
+        .load("lib.star", lib, lib_module)
+        .check(
+            "loaded_types_work_as_annotations",
+            r#"
+load("lib.star", "Lib", "Mode", "Names", L = "Lib")
+Libs = list[Lib]
+Opt = Lib | None
+
+def ok(l: Lib, m: Mode, n: Names, ls: Libs, o: Opt, a: L) -> str:
+    return l.name + m.value + n[0] + ls[0].name + a.name
+
+def bad_record(l: Lib):
+    l.nme
+
+def bad_enum(m: Mode):
+    m.nope
+
+def bad_alias(n: Names):
+    x: int = n[0]
+
+def bad_compound(ls: Libs):
+    ls[0].nme
+"#,
+        );
+}
+
+/// I4: one declaration is one type, whichever path loads it; two records with
+/// the same fields are two types.
+#[test]
+fn loaded_record_identity() {
+    let (lib, lib_module) =
+        crate::typing::tests::TypeCheck::new().check("loaded_record_identity_lib", LIB);
+    let (reexport, reexport_module) = crate::typing::tests::TypeCheck::new()
+        .load("lib.star", lib.clone(), lib_module.clone())
+        .check(
+            "loaded_record_identity_reexport",
+            r#"
+load("lib.star", _Lib = "Lib")
+Lib = _Lib
+"#,
+        );
+    crate::typing::tests::TypeCheck::new()
+        .load("lib.star", lib, lib_module)
+        .load("reexport.star", reexport, reexport_module)
+        .check(
+            "loaded_record_identity",
+            r#"
+load("lib.star", "Lib", "Other")
+load("reexport.star", Lib2 = "Lib")
+
+def takes(l: Lib):
+    pass
+
+def same(l: Lib2):
+    takes(l)
+
+def distinct(o: Other):
+    takes(o)
+"#,
+        );
+}

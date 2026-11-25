@@ -507,6 +507,7 @@ impl AstModuleTypecheck for AstModule {
         }
 
         let mut res = HashMap::new();
+        let mut as_types = HashMap::new();
         for (name, module_slot_id, vis) in names.all_names_slots_and_visibilities() {
             if vis == Visibility::Public {
                 let ty = module_var_types
@@ -515,9 +516,12 @@ impl AstModuleTypecheck for AstModule {
                     .cloned()
                     .unwrap_or_else(Ty::any);
                 res.insert(name.as_str().to_owned(), ty);
+                if let Some(as_type) = module_var_types.as_types.get(&module_slot_id) {
+                    as_types.insert(name.as_str().to_owned(), as_type.clone());
+                }
             }
         }
-        let interface = Interface::new(res);
+        let interface = Interface::new_with_types(res, as_types);
 
         (errors, typemap, interface, approximations)
     }

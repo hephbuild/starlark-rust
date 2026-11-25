@@ -1,0 +1,14 @@
+# @generated
+# To regenerate, run:
+# ```
+# STARLARK_RUST_REGENERATE_GOLDEN_TESTS=1 cargo test -p starlark --lib
+# ```
+
+Code:
+load("lib.star", _Lib = "Lib")
+Lib = _Lib
+
+No errors.
+
+Compiler typechecker (eval):
+No errors.
