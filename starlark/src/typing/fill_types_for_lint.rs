@@ -660,6 +660,11 @@ impl<'a, 'v> GlobalTypesBuilder<'a, 'v> {
         rhs: &CstExpr,
     ) -> Result<GlobalValue<'v>, InternalError> {
         let lhs = self.expr(lhs)?;
+        // Evaluation may never run the right operand of `and`/`or`, so
+        // nothing in it may be reported (`False and "s".nope()` runs).
+        if matches!(op, BinOp::And | BinOp::Or) {
+            return Ok(GlobalValue::any());
+        }
         let rhs = self.expr(rhs)?;
         if let (Some(lhs), BinOp::BitOr, Some(rhs)) =
             (lhs.type_operand(self.heap), op, rhs.type_operand(self.heap))

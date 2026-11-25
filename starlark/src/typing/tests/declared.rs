@@ -358,6 +358,31 @@ never: typing.Never
     );
 }
 
+/// The right operand of `and`/`or` may never run, so the pre-pass reports
+/// nothing in it; the left operand always runs.
+#[test]
+fn short_circuit_right_operand_unchecked() {
+    let code = r#"
+Mode = enum("a")
+x = False and "s".nope()
+y = False and Mode.nope()
+z = False and "s".nope
+w = True or Mode.nope
+"#;
+    let (errors, _) = typecheck_only(code, &[]);
+    assert_eq!(errors, Vec::<String>::new());
+    Module::with_temp_heap(|module| {
+        let ast = AstModule::parse("filename", code.to_owned(), &Dialect::Extended).unwrap();
+        let globals = Globals::extended_internal();
+        let mut eval = Evaluator::new(&module);
+        eval.eval_module(ast, &globals).unwrap();
+    });
+
+    let (errors, _) = typecheck_only("x = \"s\".nope and True\n", &[]);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(errors[0].contains("nope"), "{errors:?}");
+}
+
 /// A call result has no value, so it is never a type.
 #[test]
 fn module_call_result_is_not_a_type() {
